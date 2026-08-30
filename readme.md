@@ -39,3 +39,59 @@ RASTROX es una aplicación web offline-first que ayuda a priorizar zonas de bús
 - Los formularios ya no piden coordenadas; la ubicación se toma del punto seleccionado.
 
 ## Estructura de archivos
+
+rastro/
+├── index.html
+├── css/
+│ └── styles.css
+├── js/
+│ ├── app.js
+│ ├── map.js
+│ ├── database.js
+│ ├── calculations.js
+│ ├── probability.js
+│ ├── timeline.js
+│ ├── search-mode.js
+│ └── ui.js
+├── data/
+│ └── example-case.json
+└── README.md
+
+
+## Documentación del modelo de probabilidad
+
+El motor calcula un **score de búsqueda** (0-100) para cada celda de una cuadrícula sobre el área de interés, basado en factores ponderados:
+- Proximidad al último avistamiento confiable.
+- Proximidad a otros avistamientos (ponderados por certeza e incertidumbre).
+- Dirección de desplazamiento si hay avistamientos coherentes.
+- Proximidad al hogar (si el perro tiende a regresar).
+- Cercanía a rutas habituales.
+- Cercanía a comida/agua (según motivación).
+- Cercanía a refugios (si el perro es miedoso).
+- Expansión temporal (radio probable según velocidades configuradas).
+- Corredor de retorno hacia hogar o zona segura.
+- Afinidad con zonas seguras conocidas (nuevo en v0.2).
+- Penalización por barreras y por zonas ya revisadas (cobertura de búsqueda).
+
+El **nivel de confianza** es una métrica separada (Alta/Media/Baja) que considera calidad de avistamientos, coherencia, completitud de ficha y precisión espacio-temporal.
+
+Una zona puede tener prioridad alta pero confianza baja; esto se indica claramente.
+
+## Limitaciones conocidas
+
+- Las fotografías se almacenan como texto en localStorage; el espacio es limitado (5-10 MB).
+- El cálculo de barreras es simplificado; no se hace enrutamiento real.
+- No se incluyen teselas de mapa offline; se requiere conexión para visualizar el mapa.
+- La geolocalización puede no funcionar en todos los navegadores en contexto de archivo local.
+
+## Mejoras futuras (v0.3)
+
+- Migrar a IndexedDB para mayor capacidad y fotos.
+- Soporte de teselas offline.
+- Enrutamiento real para corredores de retorno (usar calles y pasos).
+- Integración opcional con IA para análisis de testimonios.
+- Sincronización con nube.
+
+## Autor
+
+Prototipo generado según especificación de "PROMPT MAESTRO — PROYECTO RASTRO" y su evolución v0.2.
