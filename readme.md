@@ -6,6 +6,7 @@ RASTROX es una aplicación web offline-first que ayuda a priorizar zonas de bús
 
 **Versión actual: v0.2**  
 *Principales novedades:*
+
 - Interacción táctil con pulsación larga para añadir elementos directamente desde el mapa.
 - Menú contextual con categorías (caso, evidencia, entorno, búsqueda, rutas).
 - Eliminación de la necesidad de introducir coordenadas manualmente.
