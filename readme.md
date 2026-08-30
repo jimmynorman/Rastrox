@@ -40,22 +40,43 @@ RASTROX es una aplicación web offline-first que ayuda a priorizar zonas de bús
 
 ## Estructura de archivos
 
-rastro/
-├── index.html
-├── css/
-│ └── styles.css
-├── js/
-│ ├── app.js
-│ ├── map.js
-│ ├── database.js
-│ ├── calculations.js
-│ ├── probability.js
-│ ├── timeline.js
-│ ├── search-mode.js
-│ └── ui.js
-├── data/
-│ └── example-case.json
-└── README.md
+## 📁 Estructura de archivos
+
+```text
+📁 rastro/
+├── 📄 index.html
+├── 📁 css/
+│   └── 📄 styles.css
+├── 📁 js/
+│   ├── 📄 app.js
+│   ├── 📄 map.js
+│   ├── 📄 database.js
+│   ├── 📄 calculations.js
+│   ├── 📄 probability.js
+│   ├── 📄 timeline.js
+│   ├── 📄 search-mode.js
+│   └── 📄 ui.js
+├── 📁 data/
+│   └── 📄 example-case.json
+└── 📄 README.md
+
+
+También puedes añadir una breve descripción de cada archivo justo debajo o en una tabla, por ejemplo:
+
+| Archivo | Descripción |
+|---------|-------------|
+| `index.html` | Página principal de la aplicación |
+| `css/styles.css` | Estilos y diseño responsive |
+| `js/app.js` | Inicialización y coordinación general |
+| `js/map.js` | Gestión del mapa, menú contextual, dibujo de áreas |
+| `js/database.js` | Persistencia en localStorage y migración de datos |
+| `js/calculations.js` | Funciones geométricas y de cálculo |
+| `js/probability.js` | Motor de probabilidad y confianza |
+| `js/timeline.js` | Cronología del extravío y eventos |
+| `js/search-mode.js` | Modo búsqueda y cobertura de zonas revisadas |
+| `js/ui.js` | Interfaz de usuario y formularios |
+| `data/example-case.json` | Caso de demostración |
+| `README.md` | Documentación |
 
 
 ## Documentación del modelo de probabilidad
