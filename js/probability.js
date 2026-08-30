@@ -1,7 +1,6 @@
-// probability.js — Motor de cálculo de scores de búsqueda y confianza
+// probability.js — Motor de cálculo de scores de búsqueda y confianza (ampliado con zonas seguras y cobertura)
 
 const ProbabilityEngine = {
-    // Configuración por defecto (se puede sobrescribir con Database.getConfig())
     config: null,
 
     init() {
@@ -21,51 +20,54 @@ const ProbabilityEngine = {
         (caseData.sightings || []).forEach(s => allPoints.push({ lat: s.lat, lng: s.lng }));
         (caseData.poi || []).forEach(p => allPoints.push({ lat: p.lat, lng: p.lng }));
         (caseData.habitualRoutes || []).forEach(r => r.points.forEach(p => allPoints.push({ lat: p.lat, lng: p.lng })));
+        (caseData.safeZones || []).forEach(z => {
+            if (z.type === 'circle' && z.center) allPoints.push(z.center);
+            else if (z.type === 'polygon' && z.points) z.points.forEach(p => allPoints.push({ lat: p.lat, lng: p.lng }));
+        });
 
         if (allPoints.length === 0) return [];
 
-        // Calcular bounding box y expandir
         let bbox = Calculations.boundingBox(allPoints);
         if (!bbox) return [];
         bbox = Calculations.expandBoundingBox(bbox, 0.2);
 
-        // Generar cuadrícula (40x40 = 1600 celdas, aceptable)
         const gridPoints = Calculations.generateGrid(bbox, 40, 40);
 
-        // Obtener datos necesarios
-        const lastSighting = this.getLastSighting(caseData);
+        const lastSighting = this.getLastConfidentSighting(caseData); // Usar última evidencia confiable
         const validSightings = (caseData.sightings || []).filter(s => s.certainty !== 'doubtful');
         const directionVector = this.calculateDirectionVector(caseData);
         const home = caseData.locations.home || null;
         const routes = caseData.habitualRoutes || [];
         const pois = caseData.poi || [];
+        const safeZones = caseData.safeZones || [];
+        const searchCoverage = caseData.searchCoverage || [];
         const behavior = caseData.animal?.behavior || {};
         const timeElapsedHours = this.getTimeElapsedHours(caseData);
+        const extravioTimeline = caseData.extravioTimeline || {};
 
-        // Precalcular velocidades
         const vMin = this.config.velocities.min || 0.5;
         const vMax = this.config.velocities.max || 6.0;
         const rMin = vMin * timeElapsedHours;
         const rMax = vMax * timeElapsedHours;
 
-        // Calcular corredor de retorno
         const returnCorridor = this.calculateReturnCorridor(caseData);
 
-        // Para cada celda, calcular score
         const scores = gridPoints.map(cell => {
             let score = 0;
             let totalWeight = 0;
+            const reasons = []; // Para futura explicación
 
-            // A. Proximidad al último avistamiento
+            // A. Proximidad al último avistamiento confiable
             if (lastSighting) {
                 const d = Calculations.distance(cell.lat, cell.lng, lastSighting.lat, lastSighting.lng);
                 const subscore = Math.exp(-d / (this.config.sigma || 0.5));
                 const weight = this.config.weights.lastSighting || 30;
                 score += subscore * weight;
                 totalWeight += weight;
+                if (subscore > 0.5) reasons.push('Cerca del último avistamiento confiable');
             }
 
-            // B. Proximidad a otros avistamientos
+            // B. Proximidad a otros avistamientos (ponderado por certeza)
             if (validSightings.length > 0) {
                 const certaintyWeights = { confirmed: 1, very_likely: 0.8, possible: 0.5, doubtful: 0.2 };
                 let sum = 0;
@@ -73,7 +75,11 @@ const ProbabilityEngine = {
                 validSightings.forEach(s => {
                     const d = Calculations.distance(cell.lat, cell.lng, s.lat, s.lng);
                     const c = certaintyWeights[s.certainty] || 0.5;
-                    sum += c * Math.exp(-d / (this.config.sigma || 0.5));
+                    // Ajustar por incertidumbre espacial: si tiene radio, decrecer más lentamente
+                    const sigma = (s.uncertaintyRadius && s.uncertaintyRadius > 0) 
+                        ? Math.max(this.config.sigma, s.uncertaintyRadius / 1000) 
+                        : this.config.sigma;
+                    sum += c * Math.exp(-d / sigma);
                     count++;
                 });
                 if (count > 0) {
@@ -89,14 +95,13 @@ const ProbabilityEngine = {
                 const angleToCell = Calculations.bearing(lastSighting.lat, lastSighting.lng, cell.lat, cell.lng);
                 const diff = Math.abs(angleToCell - directionVector.bearing) % 360;
                 const alignment = diff > 180 ? 360 - diff : diff;
-                // Máximo si está dentro de ±45 grados
                 const subscore = alignment <= 45 ? 1 : alignment <= 90 ? 0.5 : 0;
                 const weight = this.config.weights.direction || 15;
                 score += subscore * weight;
                 totalWeight += weight;
             }
 
-            // D. Proximidad al hogar (si el perro tiende a regresar)
+            // D. Proximidad al hogar
             if (home && behavior.returnHome > 0.3) {
                 const d = Calculations.distance(cell.lat, cell.lng, home.lat, home.lng);
                 const subscore = behavior.returnHome * Math.exp(-d / (this.config.sigmaHome || 0.8));
@@ -176,22 +181,78 @@ const ProbabilityEngine = {
                 totalWeight += weight;
             }
 
-            // J. Penalización por barreras (aproximación: si la celda está al otro lado de una barrera en relación al último punto)
+            // J. Afinidad con zonas seguras conocidas (factor nuevo)
+            if (safeZones.length > 0) {
+                let safeZoneScore = 0;
+                let maxSafeZoneScore = 0;
+                safeZones.forEach(zone => {
+                    let inside = false;
+                    let proximityScore = 0;
+                    if (zone.type === 'circle' && zone.center && zone.radiusMeters) {
+                        const d = Calculations.distance(cell.lat, cell.lng, zone.center.lat, zone.center.lng);
+                        const radiusKm = zone.radiusMeters / 1000;
+                        if (d <= radiusKm) {
+                            inside = true;
+                            proximityScore = 1;
+                        } else {
+                            proximityScore = Math.max(0, 1 - (d - radiusKm) / radiusKm);
+                        }
+                    } else if (zone.type === 'polygon' && zone.points && zone.points.length >= 3) {
+                        inside = Calculations.pointInPolygon(cell.lat, cell.lng, zone.points);
+                        if (inside) proximityScore = 1;
+                        else {
+                            // Distancia aproximada al borde del polígono (usar centroide)
+                            const centroid = Calculations.polygonCentroid(zone.points);
+                            const d = Calculations.distance(cell.lat, cell.lng, centroid.lat, centroid.lng);
+                            proximityScore = Math.max(0, 1 - d / 1); // 1 km de alcance
+                        }
+                    }
+                    if (proximityScore > 0) {
+                        const familiarityWeight = { 'Muy bajo': 0.2, 'Bajo': 0.4, 'Medio': 0.6, 'Alto': 0.8, 'Muy alto': 1.0 }[zone.familiarity] || 0.5;
+                        const frequencyWeight = { 'Ocasional': 0.3, 'Semanal': 0.5, 'Frecuente': 0.7, 'Diaria': 1.0 }[zone.frequency] || 0.5;
+                        const returnFactor = zone.returnAlone === true ? 1 : zone.returnAlone === false ? 0.5 : 0.7;
+                        const safeFactor = zone.isSafe === true ? 1 : 0.8;
+                        const combined = proximityScore * familiarityWeight * frequencyWeight * returnFactor * safeFactor;
+                        if (combined > maxSafeZoneScore) maxSafeZoneScore = combined;
+                    }
+                });
+                if (maxSafeZoneScore > 0) {
+                    const weight = this.config.weights.safeZoneAffinity || 18;
+                    score += maxSafeZoneScore * weight;
+                    totalWeight += weight;
+                    if (maxSafeZoneScore > 0.6) reasons.push('Cerca de zona segura conocida');
+                }
+            }
+
+            // K. Cobertura de búsqueda (penalización ligera si ya fue revisado)
+            if (searchCoverage.length > 0) {
+                let reviewedScore = 0;
+                searchCoverage.forEach(cov => {
+                    if (cov.type === 'circle' && cov.center && cov.radiusMeters) {
+                        const d = Calculations.distance(cell.lat, cell.lng, cov.center.lat, cov.center.lng);
+                        if (d <= cov.radiusMeters / 1000) reviewedScore = 0.3; // 30% de reducción por revisada
+                    } else if (cov.type === 'polygon' && cov.points && cov.points.length >= 3) {
+                        if (Calculations.pointInPolygon(cell.lat, cell.lng, cov.points)) reviewedScore = 0.3;
+                    }
+                });
+                if (reviewedScore > 0) {
+                    score -= reviewedScore * 20; // Restar hasta 6 puntos
+                }
+            }
+
+            // L. Penalización por barreras (simplificado)
             const barriers = pois.filter(p => ['barrier', 'river', 'canal', 'wall', 'fence', 'dangerous_crossing'].includes(p.category));
             if (barriers.length > 0 && lastSighting) {
                 let barrierPenalty = 0;
                 barriers.forEach(b => {
-                    // Si la distancia de la celda al último punto cruza la barrera (aproximación: la barrera está entre ambos)
                     const dBarrierToCell = Calculations.distance(cell.lat, cell.lng, b.lat, b.lng);
                     const dBarrierToLast = Calculations.distance(lastSighting.lat, lastSighting.lng, b.lat, b.lng);
                     const dCellToLast = Calculations.distance(cell.lat, cell.lng, lastSighting.lat, lastSighting.lng);
-                    // Si la barrera está aproximadamente en el camino
                     if (Math.abs(dBarrierToCell + dBarrierToLast - dCellToLast) < 0.1) {
                         barrierPenalty += this.config.weights.barrierPenalty || 20;
                     }
                 });
                 score -= barrierPenalty;
-                // No sumamos peso negativo, solo restamos
             }
 
             if (totalWeight > 0) {
@@ -200,21 +261,36 @@ const ProbabilityEngine = {
                 score = 0;
             }
 
-            // Clampear a 0-100
             score = Math.max(0, Math.min(100, score));
-
-            return { lat: cell.lat, lng: cell.lng, score: score };
+            return { lat: cell.lat, lng: cell.lng, score: score, reasons: reasons };
         });
 
         return scores;
     },
 
-    // Calcular nivel de confianza del análisis
+    // Obtener la última evidencia confiable (considera certeza y coherencia)
+    getLastConfidentSighting(caseData) {
+        if (!caseData || !caseData.sightings || caseData.sightings.length === 0) {
+            // Si no hay avistamientos, usar extravioTimeline.lastConfirmed o locations.lost
+            return caseData.extravioTimeline?.lastConfirmed || caseData.locations?.lost || null;
+        }
+        // Filtrar por certeza no dudosa y ordenar por fecha
+        const confident = caseData.sightings.filter(s => 
+            s.certainty === 'confirmed' || s.certainty === 'very_likely'
+        ).sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
+        if (confident.length > 0) return confident[0];
+        // Si no hay confiables, tomar el más reciente no dudoso
+        const nonDoubtful = caseData.sightings.filter(s => s.certainty !== 'doubtful')
+            .sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
+        return nonDoubtful[0] || caseData.sightings[0];
+    },
+
+    // Calcular nivel de confianza del análisis (mejorado)
     calculateConfidence(caseData) {
         if (!caseData) return { level: 'low', percentage: 0, reasons: [] };
         const reasons = [];
 
-        // Calidad de avistamientos (promedio de certeza)
+        // Calidad de avistamientos
         let avgCertainty = 0;
         const certaintyValues = { confirmed: 1, very_likely: 0.8, possible: 0.5, doubtful: 0.2 };
         if (caseData.sightings && caseData.sightings.length > 0) {
@@ -223,28 +299,15 @@ const ProbabilityEngine = {
             });
             avgCertainty /= caseData.sightings.length;
         } else {
-            avgCertainty = 0;
             reasons.push('Sin avistamientos registrados');
         }
 
-        // Coherencia (si hay avistamientos contradictorios)
+        // Coherencia (detección de conflictos)
         let coherence = 1;
-        if (caseData.sightings && caseData.sightings.length >= 2) {
-            // Detectar conflictos simples: si dos avistamientos están muy lejos en poco tiempo
-            for (let i = 0; i < caseData.sightings.length; i++) {
-                for (let j = i+1; j < caseData.sightings.length; j++) {
-                    const s1 = caseData.sightings[i];
-                    const s2 = caseData.sightings[j];
-                    const d = Calculations.distance(s1.lat, s1.lng, s2.lat, s2.lng);
-                    const timeDiff = Math.abs(new Date(s1.datetime) - new Date(s2.datetime)) / 3600000; // horas
-                    if (timeDiff > 0 && d / timeDiff > 20) { // más de 20 km/h entre avistamientos
-                        coherence *= 0.5;
-                        reasons.push('Posible conflicto: avistamientos distantes en poco tiempo');
-                        break;
-                    }
-                }
-                if (coherence < 1) break;
-            }
+        const conflicts = this.detectConflicts(caseData);
+        if (conflicts.length > 0) {
+            coherence = Math.max(0.2, 1 - conflicts.length * 0.3);
+            reasons.push('Se detectaron conflictos de evidencia');
         }
 
         // Completitud de ficha
@@ -262,46 +325,36 @@ const ProbabilityEngine = {
             }
         }
 
-        // Precisión temporal (si las horas son exactas, sin minutos en cero)
-        let temporalPrecision = 0.5;
+        // Precisión temporal y espacial
+        let precisionScore = 0.5;
         if (caseData.sightings && caseData.sightings.length > 0) {
             const hasExactTime = caseData.sightings.some(s => {
                 const d = new Date(s.datetime);
                 return d.getMinutes() !== 0 || d.getSeconds() !== 0;
             });
-            temporalPrecision = hasExactTime ? 1 : 0.3;
+            const hasHighPrecision = caseData.sightings.some(s => s.precision === 'Exacta' || s.precision === '±50m');
+            precisionScore = (hasExactTime ? 0.5 : 0.2) + (hasHighPrecision ? 0.5 : 0.2);
+        }
+        if (caseData.extravioTimeline?.lastConfirmed) {
+            precisionScore += 0.1;
         }
 
         const percentage = Math.round(
-            (0.4 * avgCertainty + 0.3 * coherence + 0.2 * completeness + 0.1 * temporalPrecision) * 100
+            (0.4 * avgCertainty + 0.3 * coherence + 0.2 * completeness + 0.1 * precisionScore) * 100
         );
         const level = percentage > 70 ? 'high' : percentage > 40 ? 'medium' : 'low';
 
         return { level, percentage, reasons };
     },
 
-    // Obtener último avistamiento (por fecha)
-    getLastSighting(caseData) {
-        if (!caseData.sightings || caseData.sightings.length === 0) {
-            // Si no hay avistamientos, usar lugar de extravío
-            return caseData.locations?.lost || null;
-        }
-        // Ordenar por fecha descendente y tomar el primero con certeza no dudosa preferiblemente
-        const sorted = [...caseData.sightings].sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
-        return sorted[0] || null;
-    },
-
     // Calcular vector de dirección a partir de avistamientos coherentes
     calculateDirectionVector(caseData) {
         if (!caseData.sightings || caseData.sightings.length < 2) return null;
-        // Filtrar avistamientos con certeza razonable
         const valid = caseData.sightings.filter(s => s.certainty !== 'doubtful');
         if (valid.length < 2) return null;
-        // Ordenar cronológicamente
         valid.sort((a, b) => new Date(a.datetime) - new Date(b.datetime));
         const first = valid[0];
         const last = valid[valid.length - 1];
-        // Verificar que el tiempo entre ellos sea positivo
         const timeDiff = (new Date(last.datetime) - new Date(first.datetime)) / 3600000;
         if (timeDiff <= 0) return null;
         const bearing = Calculations.bearing(first.lat, first.lng, last.lat, last.lng);
@@ -309,15 +362,16 @@ const ProbabilityEngine = {
         return { bearing, distance, timeDiff, speed: distance / timeDiff };
     },
 
-    // Calcular tiempo transcurrido desde el último avistamiento o pérdida
     getTimeElapsedHours(caseData) {
         const now = new Date();
         let referenceTime;
-        if (caseData.sightings && caseData.sightings.length > 0) {
-            const sorted = [...caseData.sightings].sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
-            referenceTime = new Date(sorted[0].datetime);
+        // Usar última evidencia confiable o última ubicación confirmada
+        const lastConfident = this.getLastConfidentSighting(caseData);
+        if (lastConfident && lastConfident.datetime) {
+            referenceTime = new Date(lastConfident.datetime);
+        } else if (caseData.extravioTimeline?.lastConfirmed?.datetime) {
+            referenceTime = new Date(caseData.extravioTimeline.lastConfirmed.datetime);
         } else if (caseData.locations?.lost) {
-            // Si no hay hora de extravío, estimar 1 hora
             referenceTime = new Date(now.getTime() - 60 * 60 * 1000);
         } else {
             return 1;
@@ -326,18 +380,36 @@ const ProbabilityEngine = {
         return Math.max(0, diffHours);
     },
 
-    // Calcular corredor de retorno entre último punto y hogar
+    // Calcular corredor de retorno (considera zonas seguras como destinos)
     calculateReturnCorridor(caseData) {
-        const lastPoint = this.getLastSighting(caseData);
-        const home = caseData.locations?.home;
-        if (!lastPoint || !home) return null;
-        // En v0.1, usamos línea recta con puntos muestreados
-        const points = [lastPoint, home];
-        // Podríamos agregar desviación si hay barreras, pero simplificamos
+        const lastPoint = this.getLastConfidentSighting(caseData);
+        if (!lastPoint) return null;
+
+        // Destino principal: hogar o la zona segura más familiar
+        let destination = caseData.locations?.home;
+        let maxFamiliarity = 0;
+        if (caseData.safeZones && caseData.safeZones.length > 0) {
+            caseData.safeZones.forEach(zone => {
+                const fam = { 'Muy bajo': 0.1, 'Bajo': 0.3, 'Medio': 0.5, 'Alto': 0.8, 'Muy alto': 1.0 }[zone.familiarity] || 0.5;
+                const freq = { 'Ocasional': 0.3, 'Semanal': 0.5, 'Frecuente': 0.7, 'Diaria': 1.0 }[zone.frequency] || 0.5;
+                const score = fam * freq;
+                if (score > maxFamiliarity) {
+                    maxFamiliarity = score;
+                    if (zone.type === 'circle' && zone.center) destination = zone.center;
+                    else if (zone.type === 'polygon' && zone.points && zone.points.length >= 3) {
+                        destination = Calculations.polygonCentroid(zone.points);
+                    }
+                }
+            });
+        }
+
+        if (!destination) return null;
+        // Línea recta por ahora (en v0.3 se mejorará con enrutamiento)
+        const points = [lastPoint, destination];
         return { points, bufferKm: this.config?.returnBufferKm || 0.2 };
     },
 
-    // Detectar conflictos de evidencia (para mostrar advertencia)
+    // Detectar conflictos de evidencia
     detectConflicts(caseData) {
         const conflicts = [];
         if (!caseData.sightings || caseData.sightings.length < 2) return conflicts;

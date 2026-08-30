@@ -3,31 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>RASTRO v0.1 — Búsqueda de perros extraviados</title>
+    <title>RASTROX v0.2 — Búsqueda de perros extraviados</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
     <div id="app">
-        <!-- Barra superior -->
         <header id="topbar">
             <button id="menu-toggle" class="icon-button" title="Menú">☰</button>
-            <h1>RASTRO <span>v0.1</span></h1>
+            <h1>RASTROX <span>v0.2</span></h1>
             <div id="case-indicator">Sin caso activo</div>
             <button id="theme-toggle" class="icon-button" title="Cambiar tema">🌓</button>
         </header>
 
-        <!-- Contenedor principal -->
         <div id="main-container">
-            <!-- Panel lateral -->
             <aside id="sidebar">
                 <nav id="tabs">
                     <button class="tab active" data-tab="dashboard">📊 Dashboard</button>
                     <button class="tab" data-tab="animal">🐕 Ficha del animal</button>
+                    <button class="tab" data-tab="timeline">⏱️ Cronología</button>
                     <button class="tab" data-tab="sightings">👀 Avistamientos</button>
-                    <button class="tab" data-tab="routes">🛤 Rutas habituales</button>
+                    <button class="tab" data-tab="zones">🛡️ Zonas seguras</button>
+                    <button class="tab" data-tab="routes">🛤️ Rutas</button>
                     <button class="tab" data-tab="poi">📍 Puntos de interés</button>
-                    <button class="tab" data-tab="timeline">🕒 Cronología</button>
                     <button class="tab" data-tab="evidence">🔍 Evidencias</button>
                     <button class="tab" data-tab="search">🔎 Modo Búsqueda</button>
                     <button class="tab" data-tab="config">⚙️ Configuración</button>
@@ -35,13 +33,10 @@
                 </nav>
             </aside>
 
-            <!-- Contenido principal -->
             <main id="content">
-                <!-- Secciones dinámicas -->
                 <div id="tab-content"></div>
             </main>
 
-            <!-- Mapa -->
             <div id="map-container">
                 <div id="map"></div>
                 <div id="map-controls">
@@ -49,6 +44,10 @@
                     <button id="btn-zoom-out" title="Alejar">−</button>
                     <button id="btn-locate" title="Mi ubicación">◎</button>
                     <button id="btn-fullscreen" title="Pantalla completa">⛶</button>
+                    <button id="btn-add" title="Agregar elemento">＋</button>
+                    <button id="btn-draw-route" title="Dibujar ruta">🛤️</button>
+                    <button id="btn-draw-zone" title="Dibujar zona segura">🛡️</button>
+                    <button id="btn-layers" title="Capas">☰</button>
                 </div>
                 <div id="map-legend">
                     <div class="legend-title">Prioridad de búsqueda</div>
@@ -57,12 +56,57 @@
                     <div><span class="legend-color" style="background:#ffff00"></span> Media</div>
                     <div><span class="legend-color" style="background:#00cc00"></span> Baja</div>
                     <div><span class="legend-color" style="background:#cccccc"></span> Muy baja</div>
+                    <div><span class="legend-color" style="background:#3366cc; opacity:0.5"></span> Zona segura</div>
+                    <div><span class="legend-color" style="background:#66cc66; opacity:0.5"></span> Revisada</div>
+                </div>
+                <!-- Menú contextual -->
+                <div id="context-menu" class="hidden">
+                    <div class="context-title">📍 ¿Qué quieres registrar aquí?</div>
+                    <button class="context-item" data-action="lost">🔴 Lugar donde se extravió</button>
+                    <button class="context-item" data-action="last_confirmed">👀 Última ubicación confirmada</button>
+                    <button class="context-item" data-action="home">🏠 Hogar</button>
+                    <button class="context-item" data-action="base">📍 Lugar base</button>
+                    <button class="context-item" data-action="safe_zone_circle">🛡️ Zona segura (círculo)</button>
+                    <button class="context-item" data-action="safe_zone_polygon">🛡️ Zona segura (polígono)</button>
+                    <div class="context-divider"></div>
+                    <button class="context-item" data-action="sighting">👀 Avistamiento</button>
+                    <button class="context-item" data-action="evidence">📸 Evidencia</button>
+                    <button class="context-item" data-action="testimony">🗣️ Testimonio</button>
+                    <div class="context-divider"></div>
+                    <button class="context-item" data-action="water">💧 Agua</button>
+                    <button class="context-item" data-action="food">🍖 Comida</button>
+                    <button class="context-item" data-action="refuge">🏚️ Refugio</button>
+                    <button class="context-item" data-action="barrier">🚧 Barrera</button>
+                    <button class="context-item" data-action="danger">⚠️ Zona peligrosa</button>
+                    <button class="context-item" data-action="other_poi">📌 Otro lugar de interés</button>
+                    <div class="context-divider"></div>
+                    <button class="context-item" data-action="mark_reviewed">🔎 Marcar zona revisada</button>
+                    <button class="context-item" data-action="new_sighting_quick">👀 Nuevo avistamiento (rápido)</button>
+                    <div class="context-divider"></div>
+                    <button class="context-item" data-action="start_route">🛤️ Crear ruta desde aquí</button>
+                </div>
+                <!-- Panel de capas -->
+                <div id="layers-panel" class="hidden">
+                    <div class="layers-title">☰ Capas</div>
+                    <label><input type="checkbox" checked onchange="MapManager.toggleLayer('sightings', this.checked)"> Avistamientos</label>
+                    <label><input type="checkbox" checked onchange="MapManager.toggleLayer('lastPoint', this.checked)"> Último punto</label>
+                    <label><input type="checkbox" checked onchange="MapManager.toggleLayer('home', this.checked)"> Hogar</label>
+                    <label><input type="checkbox" checked onchange="MapManager.toggleLayer('base', this.checked)"> Lugar base</label>
+                    <label><input type="checkbox" checked onchange="MapManager.toggleLayer('routes', this.checked)"> Rutas habituales</label>
+                    <label><input type="checkbox" checked onchange="MapManager.toggleLayer('returnCorridor', this.checked)"> Ruta de retorno</label>
+                    <label><input type="checkbox" checked onchange="MapManager.toggleLayer('safeZones', this.checked)"> Zonas seguras</label>
+                    <label><input type="checkbox" checked onchange="MapManager.toggleLayer('water', this.checked)"> Agua</label>
+                    <label><input type="checkbox" checked onchange="MapManager.toggleLayer('food', this.checked)"> Comida</label>
+                    <label><input type="checkbox" checked onchange="MapManager.toggleLayer('refuges', this.checked)"> Refugios</label>
+                    <label><input type="checkbox" checked onchange="MapManager.toggleLayer('barriers', this.checked)"> Barreras</label>
+                    <label><input type="checkbox" checked onchange="MapManager.toggleLayer('priorityZones', this.checked)"> Zonas prioritarias</label>
+                    <label><input type="checkbox" checked onchange="MapManager.toggleLayer('reviewedZones', this.checked)"> Cobertura de búsqueda</label>
+                    <label><input type="checkbox" checked onchange="MapManager.toggleLayer('currentLocation', this.checked)"> Mi ubicación</label>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Modal para formularios y mensajes -->
     <div id="modal-overlay" class="hidden">
         <div id="modal-content">
             <span id="modal-close" class="close-button">✕</span>
@@ -70,7 +114,6 @@
         </div>
     </div>
 
-    <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="js/calculations.js"></script>
     <script src="js/database.js"></script>

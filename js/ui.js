@@ -1,10 +1,9 @@
-// ui.js — Renderizado de interfaz, paneles, formularios, dashboard, filtros
+// ui.js — Renderizado de interfaz, formularios descriptivos sin coordenadas manuales, ayuda contextual
 
 const UI = {
     currentTab: 'dashboard',
 
     init() {
-        // Inicializar pestañas
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 const tabName = tab.dataset.tab;
@@ -12,22 +11,18 @@ const UI = {
             });
         });
 
-        // Botón menú móvil
         document.getElementById('menu-toggle').addEventListener('click', () => {
             document.getElementById('sidebar').classList.toggle('hidden-mobile');
         });
 
-        // Botón tema
         document.getElementById('theme-toggle').addEventListener('click', () => {
             this.toggleTheme();
         });
 
-        // Cerrar modal
         document.getElementById('modal-close').addEventListener('click', () => {
             this.hideModal();
         });
 
-        // Escuchar clic en mapa para formularios
         document.addEventListener('rastro:mapClick', (e) => {
             this.handleMapClickForForm(e.detail);
         });
@@ -38,7 +33,6 @@ const UI = {
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
         document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
         this.renderCurrentTab();
-        // En móvil, ocultar sidebar
         if (window.innerWidth <= 768) {
             document.getElementById('sidebar').classList.add('hidden-mobile');
         }
@@ -55,10 +49,11 @@ const UI = {
         switch (this.currentTab) {
             case 'dashboard': this.renderDashboard(caseData, container); break;
             case 'animal': this.renderAnimalForm(caseData, container); break;
+            case 'timeline': this.renderTimelineTab(caseData, container); break;
             case 'sightings': this.renderSightings(caseData, container); break;
+            case 'zones': this.renderSafeZones(caseData, container); break;
             case 'routes': this.renderRoutes(caseData, container); break;
             case 'poi': this.renderPOIs(caseData, container); break;
-            case 'timeline': this.renderTimelineTab(caseData, container); break;
             case 'evidence': this.renderEvidence(caseData, container); break;
             case 'search': this.renderSearchTab(caseData, container); break;
             case 'config': this.renderConfig(container); break;
@@ -67,9 +62,10 @@ const UI = {
         }
     },
 
+    // ========== DASHBOARD ==========
     renderDashboard(caseData, container) {
         if (!caseData) return;
-        const lastSighting = ProbabilityEngine.getLastSighting(caseData);
+        const lastSighting = ProbabilityEngine.getLastConfidentSighting(caseData);
         const timeElapsed = ProbabilityEngine.getTimeElapsedHours(caseData);
         const confidence = ProbabilityEngine.calculateConfidence(caseData);
         const conflicts = ProbabilityEngine.detectConflicts(caseData);
@@ -81,13 +77,16 @@ const UI = {
         html += `<p><strong>🐕 Animal:</strong> ${caseData.animal?.name || 'Sin nombre'}</p>`;
         html += `<p><strong>⏱ Tiempo transcurrido:</strong> ${timeElapsed.toFixed(1)} horas</p>`;
         if (lastSighting) {
-            html += `<p><strong>📍 Última ubicación conocida:</strong> (${lastSighting.lat.toFixed(5)}, ${lastSighting.lng.toFixed(5)})</p>`;
+            html += `<p><strong>📍 Última ubicación confiable:</strong> (${lastSighting.lat.toFixed(5)}, ${lastSighting.lng.toFixed(5)})</p>`;
             html += `<p><strong>👀 Último avistamiento:</strong> ${new Date(lastSighting.datetime).toLocaleString()}</p>`;
         }
         if (distToHome !== null) {
             html += `<p><strong>🏠 Distancia al hogar:</strong> ${distToHome.toFixed(2)} km</p>`;
         }
         html += `<p><strong>📊 Nivel de confianza:</strong> <span class="score-badge confidence-${confidence.level}">${confidence.level.toUpperCase()} (${confidence.percentage}%)</span></p>`;
+        if (confidence.reasons && confidence.reasons.length > 0) {
+            html += `<p><small>${confidence.reasons.join(', ')}</small></p>`;
+        }
         if (direction) {
             html += `<p><strong>🧭 Dirección probable:</strong> ${direction.bearing.toFixed(0)}° (velocidad estimada ${direction.speed.toFixed(1)} km/h)</p>`;
         } else {
@@ -101,7 +100,6 @@ const UI = {
         }
         html += '</div>';
 
-        // Botón para recalcular y mostrar zonas
         html += `<button class="btn" onclick="UI.recalculateZones()">🔄 Recalcular zonas de búsqueda</button>`;
 
         container.innerHTML = html;
@@ -112,13 +110,13 @@ const UI = {
         if (!caseData) return;
         const scores = ProbabilityEngine.calculateGridScores(caseData);
         MapManager.showPriorityZones(scores);
-        // También dibujar corredor de retorno
         const corridor = ProbabilityEngine.calculateReturnCorridor(caseData);
         if (corridor) {
             MapManager.drawReturnCorridor(corridor.points, corridor.bufferKm);
         }
     },
 
+    // ========== FICHA DEL ANIMAL (con descripciones) ==========
     renderAnimalForm(caseData, container) {
         if (!caseData) return;
         const a = caseData.animal || {};
@@ -136,17 +134,31 @@ const UI = {
         html += `<div class="form-group"><label>Color</label><input type="text" name="color" value="${a.color || ''}"></div>`;
         html += `<div class="form-group"><label>Características distintivas</label><textarea name="distinctive">${a.distinctive || ''}</textarea></div>`;
 
-        html += '<h4>Comportamiento (0 = nada, 1 = mucho)</h4>';
-        const behaviorFields = [
-            ['sociability', 'Sociabilidad'], ['fearPeople', 'Miedo a personas'], ['fearTraffic', 'Miedo al tráfico'],
-            ['fearVehicles', 'Miedo a vehículos'], ['followPeople', 'Tiende a seguir personas'], ['followDogs', 'Tiende a seguir perros'],
-            ['territorial', 'Territorialidad'], ['hideTendency', 'Tendencia a esconderse'], ['foodMotivated', 'Motivado por comida'],
-            ['waterMotivated', 'Busca agua'], ['returnHome', 'Tiende a regresar al hogar'], ['walkingExperience', 'Experiencia caminando solo'],
-            ['neighborhoodKnowledge', 'Conocimiento del barrio'], ['activityLevel', 'Nivel de actividad']
-        ];
-        behaviorFields.forEach(([key, label]) => {
+        html += '<h4>Comportamiento</h4>';
+        const behaviorDescriptions = {
+            sociability: '¿Cómo suele reaccionar ante personas desconocidas?',
+            fearPeople: '¿Muestra miedo o evita a las personas?',
+            fearTraffic: '¿Le asusta el tráfico?',
+            fearVehicles: '¿Le asustan los vehículos en movimiento?',
+            followPeople: '¿Tiende a seguir a personas?',
+            followDogs: '¿Tiende a seguir a otros perros?',
+            territorial: '¿Es territorial con su espacio?',
+            hideTendency: '¿Tiende a esconderse en lugares poco visibles?',
+            foodMotivated: '¿Se siente atraído por la comida?',
+            waterMotivated: '¿Busca agua con frecuencia?',
+            returnHome: '¿Suele intentar regresar a casa?',
+            walkingExperience: '¿Tiene experiencia caminando solo por la zona?',
+            neighborhoodKnowledge: '¿Conoce bien el vecindario?',
+            activityLevel: '¿Qué tan activo es?'
+        };
+        const behaviorFields = Object.keys(behaviorDescriptions);
+        behaviorFields.forEach(key => {
+            const label = behaviorDescriptions[key];
             const val = b[key] !== undefined ? b[key] : 0.5;
-            html += `<div class="form-group"><label>${label}</label><input type="range" min="0" max="1" step="0.1" name="behavior_${key}" value="${val}" oninput="this.nextElementSibling.textContent = this.value"><span>${val}</span></div>`;
+            html += `<div class="form-group"><label>${label}</label>`;
+            html += `<input type="range" min="0" max="1" step="0.1" name="behavior_${key}" value="${val}" oninput="this.nextElementSibling.textContent = this.value"><span>${val}</span>`;
+            html += `<div class="help-text">¿Por qué importa? Afecta el modelo de probabilidad: un perro sociable podría acercarse a personas, uno miedoso buscaría refugios.</div>`;
+            html += `</div>`;
         });
 
         html += '<button type="submit" class="btn">Guardar ficha</button>';
@@ -179,18 +191,27 @@ const UI = {
         AppState.currentCase = Database.getCase(caseData.id);
         this.renderCurrentTab();
         MapManager.setCase(AppState.currentCase);
+        this.recalculateZones();
     },
 
+    // ========== CRONOLOGÍA ==========
+    renderTimelineTab(caseData, container) {
+        container.innerHTML = '<div id="timeline-container"></div>';
+        TimelineManager.renderTimeline(caseData, 'timeline-container');
+    },
+
+    // ========== AVISTAMIENTOS ==========
     renderSightings(caseData, container) {
         let html = '<div class="card"><h3>👀 Avistamientos</h3>';
-        html += '<button class="btn" onclick="UI.showAddSightingForm()">➕ Agregar avistamiento</button>';
-        html += '<table><tr><th>Fecha/Hora</th><th>Ubicación</th><th>Certeza</th><th>Descripción</th><th>Acciones</th></tr>';
+        html += '<button class="btn" onclick="UI.showSightingForm(null, null)">➕ Agregar avistamiento (elegir en mapa)</button>';
+        html += '<table><tr><th>Fecha/Hora</th><th>Ubicación</th><th>Certeza</th><th>Precisión</th><th>Descripción</th><th>Acciones</th></tr>';
         (caseData.sightings || []).forEach(s => {
             const certaintyClass = { confirmed: 'priority-very-high', very_likely: 'priority-high', possible: 'priority-medium', doubtful: 'priority-very-low' }[s.certainty] || '';
             html += `<tr>
                 <td>${new Date(s.datetime).toLocaleString()}</td>
                 <td>(${s.lat.toFixed(5)}, ${s.lng.toFixed(5)})</td>
                 <td><span class="score-badge ${certaintyClass}">${s.certainty}</span></td>
+                <td>${s.precision || 'Exacta'}</td>
                 <td>${s.description || ''}</td>
                 <td><button class="btn btn-sm btn-danger" onclick="UI.deleteSighting('${s.id}')">Eliminar</button></td>
             </tr>`;
@@ -199,16 +220,20 @@ const UI = {
         container.innerHTML = html;
     },
 
-    showAddSightingForm() {
+    showSightingForm(lat, lng) {
+        // Si no se proporcionan lat/lng, pedir al usuario que haga clic en el mapa
+        if (lat === null || lat === undefined || lng === null || lng === undefined) {
+            alert('Haz clic en el mapa para seleccionar la ubicación del avistamiento.');
+            this.pendingAction = { type: 'sighting' };
+            return;
+        }
         const html = `
             <h3>Nuevo avistamiento</h3>
-            <form onsubmit="UI.addSighting(event)">
+            <p><strong>📍 Ubicación seleccionada:</strong> ${lat.toFixed(5)}, ${lng.toFixed(5)} <button class="btn btn-sm" onclick="MapManager.setView(${lat}, ${lng}, 16)">Ver</button></p>
+            <form onsubmit="UI.addSighting(event, ${lat}, ${lng})">
                 <div class="form-group"><label>Fecha y hora</label><input type="datetime-local" name="datetime" required></div>
-                <div class="form-group"><label>Latitud</label><input type="number" step="any" name="lat" required placeholder="ej. -7.1638"></div>
-                <div class="form-group"><label>Longitud</label><input type="number" step="any" name="lng" required placeholder="ej. -78.5004"></div>
                 <div class="form-group"><label>Reportado por</label><input type="text" name="reporter"></div>
                 <div class="form-group"><label>Descripción</label><textarea name="description"></textarea></div>
-                <div class="form-group"><label>Distancia estimada (m)</label><input type="number" name="estimatedDistance" value="10"></div>
                 <div class="form-group"><label>Dirección observada</label><input type="text" name="direction" placeholder="Norte, Sur, etc."></div>
                 <div class="form-group"><label>Velocidad estimada (km/h)</label><input type="number" name="speed" value="0"></div>
                 <div class="form-group"><label>Nivel de certeza</label>
@@ -219,6 +244,16 @@ const UI = {
                         <option value="doubtful">⚪ Dudoso</option>
                     </select>
                 </div>
+                <div class="form-group"><label>Precisión geográfica</label>
+                    <select name="precision">
+                        <option value="Exacta">Exacta</option>
+                        <option value="±50m">±50 m</option>
+                        <option value="±200m">±200 m</option>
+                        <option value="±500m">±500 m</option>
+                        <option value="±1km">±1 km</option>
+                    </select>
+                    <div class="help-text">Selecciona la incertidumbre estimada del testigo.</div>
+                </div>
                 <div class="form-group"><label>Fotografía (URL o base64)</label><textarea name="photo"></textarea></div>
                 <div class="form-group"><label>Notas</label><textarea name="notes"></textarea></div>
                 <button type="submit" class="btn">Guardar</button>
@@ -227,28 +262,31 @@ const UI = {
         this.showModal(html);
     },
 
-    addSighting(event) {
+    addSighting(event, lat, lng) {
         event.preventDefault();
         const caseData = AppState.currentCase;
         const form = event.target;
+        const precision = form.precision.value;
+        const uncertaintyMap = { 'Exacta': 0, '±50m': 50, '±200m': 200, '±500m': 500, '±1km': 1000 };
         const sighting = {
             id: Database.generateId(),
             datetime: form.datetime.value,
-            lat: parseFloat(form.lat.value),
-            lng: parseFloat(form.lng.value),
+            lat: lat,
+            lng: lng,
             reporter: form.reporter.value,
             description: form.description.value,
-            estimatedDistance: parseFloat(form.estimatedDistance.value) || 0,
+            estimatedDistance: 0,
             direction: form.direction.value,
             speed: parseFloat(form.speed.value) || 0,
             certainty: form.certainty.value,
+            precision: precision,
+            uncertaintyRadius: uncertaintyMap[precision] || 0,
             photo: form.photo.value,
             notes: form.notes.value
         };
         caseData.sightings = caseData.sightings || [];
         caseData.sightings.push(sighting);
         Database.updateCase(caseData.id, { sightings: caseData.sightings });
-        // Agregar a cronología
         TimelineManager.addEvent(caseData, {
             datetime: sighting.datetime,
             type: 'sighting',
@@ -274,57 +312,381 @@ const UI = {
         this.recalculateZones();
     },
 
-    renderRoutes(caseData, container) {
-        let html = '<div class="card"><h3>🛤 Rutas habituales</h3>';
-        html += '<button class="btn" onclick="UI.showAddRouteForm()">➕ Agregar ruta</button>';
-        html += '<table><tr><th>Nombre</th><th>Frecuencia</th><th>Horario</th><th>Distancia (km)</th><th>Confianza</th><th>Acciones</th></tr>';
-        (caseData.habitualRoutes || []).forEach(r => {
-            html += `<tr><td>${r.name}</td><td>${r.frequency || ''}</td><td>${r.schedule || ''}</td><td>${r.distance || ''}</td><td>${r.confidence || ''}</td>
-            <td><button class="btn btn-sm btn-danger" onclick="UI.deleteRoute('${r.id}')">Eliminar</button></td></tr>`;
+    // ========== ZONAS SEGURAS ==========
+    renderSafeZones(caseData, container) {
+        let html = '<div class="card"><h3>🛡️ Zonas seguras conocidas</h3>';
+        html += '<button class="btn" onclick="UI.startDrawSafeZone()">➕ Dibujar zona segura</button>';
+        html += '<table><tr><th>Nombre</th><th>Tipo</th><th>Familiaridad</th><th>Frecuencia</th><th>Acciones</th></tr>';
+        (caseData.safeZones || []).forEach(z => {
+            html += `<tr><td>${z.name}</td><td>${z.type === 'circle' ? 'Círculo' : 'Polígono'}</td><td>${z.familiarity || ''}</td><td>${z.frequency || ''}</td>
+            <td><button class="btn btn-sm btn-danger" onclick="UI.deleteSafeZone('${z.id}')">Eliminar</button></td></tr>`;
         });
         html += '</table></div>';
         container.innerHTML = html;
     },
 
-    showAddRouteForm() {
+    startDrawSafeZone() {
+        alert('Usa el menú contextual (mantén presionado en el mapa) y selecciona "Zona segura (círculo)" o "Zona segura (polígono)".');
+    },
+
+    showSafeZoneForm(centerLat, centerLng, type, points, radiusMeters) {
+        const caseData = AppState.currentCase;
+        if (!caseData) return;
+
+        let locationDesc = '';
+        if (type === 'circle' && centerLat !== null) {
+            locationDesc = `Centro: ${centerLat.toFixed(5)}, ${centerLng.toFixed(5)}, Radio: ${radiusMeters} m`;
+        } else if (type === 'polygon' && points) {
+            locationDesc = `Polígono con ${points.length} vértices`;
+        }
+
         const html = `
-            <h3>Nueva ruta habitual</h3>
-            <form onsubmit="UI.addRoute(event)">
-                <div class="form-group"><label>Nombre</label><input type="text" name="name" required></div>
-                <div class="form-group"><label>Frecuencia</label><input type="text" name="frequency" placeholder="Diaria, Semanal"></div>
-                <div class="form-group"><label>Horario</label><input type="text" name="schedule" placeholder="07:00-07:40"></div>
-                <div class="form-group"><label>Días</label><input type="text" name="days" placeholder="Todos, Lunes a Viernes"></div>
-                <div class="form-group"><label>Distancia (km)</label><input type="number" step="0.1" name="distance"></div>
-                <div class="form-group"><label>Duración (min)</label><input type="number" name="duration"></div>
-                <div class="form-group"><label>Nivel de confianza (0-1)</label><input type="range" min="0" max="1" step="0.1" name="confidence" value="0.8" oninput="this.nextElementSibling.textContent = this.value"><span>0.8</span></div>
-                <div class="form-group"><label>Puntos (JSON array de {lat,lng})</label><textarea name="points" rows="4" placeholder='[{"lat":-7.156,"lng":-78.493},{"lat":-7.158,"lng":-78.495}]'></textarea></div>
+            <h3>🛡️ Nueva zona segura conocida</h3>
+            <p><strong>📍 Área:</strong> ${locationDesc}</p>
+            <form onsubmit="UI.saveSafeZone(event, ${type === 'circle' ? `{lat: ${centerLat}, lng: ${centerLng}}` : 'null'}, ${type === 'polygon' ? JSON.stringify(points) : 'null'}, ${radiusMeters || 'null'}, '${type}')">
+                <div class="form-group"><label>Nombre de la zona</label><input type="text" name="name" required placeholder="Ej: Barrio donde creció"></div>
+                <div class="form-group"><label>Tipo</label>
+                    <select name="zoneType">
+                        <option>Hogar</option><option>Barrio conocido</option><option>Parque habitual</option>
+                        <option>Zona de paseo</option><option>Casa conocida</option><option>Lugar de comida</option>
+                        <option>Lugar de descanso</option><option>Territorio habitual</option><option>Otra</option>
+                    </select>
+                </div>
+                <div class="form-group"><label>Nivel de familiaridad</label>
+                    <select name="familiarity">
+                        <option>Muy bajo</option><option>Bajo</option><option>Medio</option><option>Alto</option><option>Muy alto</option>
+                    </select>
+                </div>
+                <div class="form-group"><label>Frecuencia de visita</label>
+                    <select name="frequency">
+                        <option>Ocasional</option><option>Semanal</option><option>Frecuente</option><option>Diaria</option>
+                    </select>
+                </div>
+                <div class="form-group"><label>¿El perro suele regresar por sí mismo?</label>
+                    <select name="returnAlone"><option>No se sabe</option><option>Sí</option><option>No</option></select>
+                </div>
+                <div class="form-group"><label>¿Es una zona donde suele sentirse seguro?</label>
+                    <select name="isSafe"><option>No se sabe</option><option>Sí</option><option>No</option></select>
+                </div>
+                <div class="form-group"><label>Observaciones</label><textarea name="observations"></textarea></div>
+                <button type="submit" class="btn">Guardar zona segura</button>
+            </form>
+        `;
+        this.showModal(html);
+    },
+
+    saveSafeZone(event, center, points, radiusMeters, type) {
+        event.preventDefault();
+        const caseData = AppState.currentCase;
+        const form = event.target;
+        const zone = {
+            id: Database.generateId(),
+            name: form.name.value,
+            type: type,
+            zoneType: form.zoneType.value,
+            familiarity: form.familiarity.value,
+            frequency: form.frequency.value,
+            returnAlone: form.returnAlone.value === 'Sí' ? true : form.returnAlone.value === 'No' ? false : null,
+            isSafe: form.isSafe.value === 'Sí' ? true : form.isSafe.value === 'No' ? false : null,
+            observations: form.observations.value
+        };
+        if (type === 'circle') {
+            zone.center = center;
+            zone.radiusMeters = radiusMeters;
+        } else if (type === 'polygon') {
+            zone.points = points;
+        }
+        caseData.safeZones = caseData.safeZones || [];
+        caseData.safeZones.push(zone);
+        Database.updateCase(caseData.id, { safeZones: caseData.safeZones });
+        AppState.currentCase = Database.getCase(caseData.id);
+        this.hideModal();
+        this.renderCurrentTab();
+        MapManager.setCase(AppState.currentCase);
+        this.recalculateZones();
+    },
+
+    deleteSafeZone(zoneId) {
+        if (!confirm('¿Eliminar esta zona segura?')) return;
+        const caseData = AppState.currentCase;
+        caseData.safeZones = caseData.safeZones.filter(z => z.id !== zoneId);
+        Database.updateCase(caseData.id, { safeZones: caseData.safeZones });
+        AppState.currentCase = Database.getCase(caseData.id);
+        this.renderCurrentTab();
+        MapManager.setCase(AppState.currentCase);
+        this.recalculateZones();
+    },
+
+    // ========== LUGAR DE EXTRAVÍO ==========
+    showLostForm(lat, lng) {
+        const html = `
+            <h3>🔴 Lugar donde se extravió</h3>
+            <p><strong>📍 Ubicación seleccionada:</strong> ${lat.toFixed(5)}, ${lng.toFixed(5)}</p>
+            <form onsubmit="UI.saveLostLocation(event, ${lat}, ${lng})">
+                <div class="form-group"><label>Fecha y hora</label><input type="datetime-local" name="datetime" required></div>
+                <div class="form-group"><label>Descripción</label><textarea name="description"></textarea></div>
+                <div class="form-group"><label>Precisión de ubicación</label>
+                    <select name="precision"><option>Exacta</option><option>±50m</option><option>±200m</option><option>±500m</option><option>±1km</option></select>
+                </div>
+                <div class="form-group"><label>Observaciones</label><textarea name="notes"></textarea></div>
                 <button type="submit" class="btn">Guardar</button>
             </form>
         `;
         this.showModal(html);
     },
 
-    addRoute(event) {
+    saveLostLocation(event, lat, lng) {
         event.preventDefault();
         const caseData = AppState.currentCase;
         const form = event.target;
-        let points;
-        try {
-            points = JSON.parse(form.points.value);
-        } catch (e) {
-            alert('Formato de puntos inválido. Use JSON array.');
+        caseData.locations = caseData.locations || {};
+        caseData.locations.lost = {
+            lat: lat,
+            lng: lng,
+            description: form.description.value,
+            datetime: form.datetime.value,
+            precision: form.precision.value
+        };
+        Database.updateCase(caseData.id, { locations: caseData.locations });
+        // También actualizar cronología del extravío si no existe lastConfirmed
+        if (!caseData.extravioTimeline?.lastConfirmed) {
+            TimelineManager.updateExtravioTimeline(caseData, 'lastConfirmed', {
+                datetime: form.datetime.value,
+                lat: lat,
+                lng: lng,
+                description: form.description.value,
+                precision: form.precision.value
+            });
+        }
+        AppState.currentCase = Database.getCase(caseData.id);
+        this.hideModal();
+        this.renderCurrentTab();
+        MapManager.setCase(AppState.currentCase);
+        this.recalculateZones();
+    },
+
+    // ========== ÚLTIMA UBICACIÓN CONFIRMADA ==========
+    showLastConfirmedForm(lat, lng) {
+        if (lat === null || lat === undefined) {
+            alert('Haz clic en el mapa para seleccionar la ubicación.');
+            this.pendingAction = { type: 'lastConfirmed' };
             return;
         }
+        const html = `
+            <h3>👀 Última ubicación confirmada</h3>
+            <p><strong>📍 Ubicación:</strong> ${lat.toFixed(5)}, ${lng.toFixed(5)}</p>
+            <form onsubmit="UI.saveLastConfirmed(event, ${lat}, ${lng})">
+                <div class="form-group"><label>Fecha y hora</label><input type="datetime-local" name="datetime" required></div>
+                <div class="form-group"><label>Descripción</label><textarea name="description"></textarea></div>
+                <div class="form-group"><label>Precisión</label>
+                    <select name="precision"><option>Exacta</option><option>±50m</option><option>±200m</option><option>±500m</option><option>±1km</option></select>
+                </div>
+                <button type="submit" class="btn">Guardar</button>
+            </form>
+        `;
+        this.showModal(html);
+    },
+
+    saveLastConfirmed(event, lat, lng) {
+        event.preventDefault();
+        const caseData = AppState.currentCase;
+        const form = event.target;
+        TimelineManager.updateExtravioTimeline(caseData, 'lastConfirmed', {
+            datetime: form.datetime.value,
+            lat: lat,
+            lng: lng,
+            description: form.description.value,
+            precision: form.precision.value
+        });
+        AppState.currentCase = Database.getCase(caseData.id);
+        this.hideModal();
+        this.renderCurrentTab();
+        MapManager.setCase(AppState.currentCase);
+        this.recalculateZones();
+    },
+
+    // ========== HOGAR / BASE ==========
+    showHomeForm(lat, lng) {
+        const html = `
+            <h3>🏠 Hogar</h3>
+            <p><strong>📍 Ubicación:</strong> ${lat.toFixed(5)}, ${lng.toFixed(5)}</p>
+            <form onsubmit="UI.saveHome(event, ${lat}, ${lng})">
+                <div class="form-group"><label>Descripción</label><input type="text" name="description" value="Hogar"></div>
+                <button type="submit" class="btn">Guardar</button>
+            </form>
+        `;
+        this.showModal(html);
+    },
+
+    saveHome(event, lat, lng) {
+        event.preventDefault();
+        const caseData = AppState.currentCase;
+        const form = event.target;
+        caseData.locations = caseData.locations || {};
+        caseData.locations.home = { lat, lng, description: form.description.value };
+        Database.updateCase(caseData.id, { locations: caseData.locations });
+        AppState.currentCase = Database.getCase(caseData.id);
+        this.hideModal();
+        this.renderCurrentTab();
+        MapManager.setCase(AppState.currentCase);
+        this.recalculateZones();
+    },
+
+    showBaseForm(lat, lng) {
+        const html = `
+            <h3>📍 Lugar base</h3>
+            <p><strong>📍 Ubicación:</strong> ${lat.toFixed(5)}, ${lng.toFixed(5)}</p>
+            <form onsubmit="UI.saveBase(event, ${lat}, ${lng})">
+                <div class="form-group"><label>Descripción</label><input type="text" name="description" value="Lugar base"></div>
+                <button type="submit" class="btn">Guardar</button>
+            </form>
+        `;
+        this.showModal(html);
+    },
+
+    saveBase(event, lat, lng) {
+        event.preventDefault();
+        const caseData = AppState.currentCase;
+        const form = event.target;
+        caseData.locations = caseData.locations || {};
+        caseData.locations.base = { lat, lng, description: form.description.value };
+        Database.updateCase(caseData.id, { locations: caseData.locations });
+        AppState.currentCase = Database.getCase(caseData.id);
+        this.hideModal();
+        this.renderCurrentTab();
+        MapManager.setCase(AppState.currentCase);
+        this.recalculateZones();
+    },
+
+    // ========== PUNTOS DE INTERÉS ==========
+    showPOIForm(lat, lng, category) {
+        const categoryNames = {
+            water: '💧 Agua', food: '🍖 Comida', refuge: '🏚️ Refugio', barrier: '🚧 Barrera',
+            dangerous_crossing: '⚠️ Zona peligrosa', other: '📌 Otro lugar de interés'
+        };
+        const catName = categoryNames[category] || category;
+        const html = `
+            <h3>${catName}</h3>
+            <p><strong>📍 Ubicación:</strong> ${lat.toFixed(5)}, ${lng.toFixed(5)}</p>
+            <form onsubmit="UI.savePOI(event, ${lat}, ${lng}, '${category}')">
+                <div class="form-group"><label>Descripción</label><textarea name="description"></textarea></div>
+                <div class="form-group"><label>Importancia (0-1)</label><input type="range" min="0" max="1" step="0.1" name="importance" value="0.5" oninput="this.nextElementSibling.textContent = this.value"><span>0.5</span></div>
+                <button type="submit" class="btn">Guardar</button>
+            </form>
+        `;
+        this.showModal(html);
+    },
+
+    savePOI(event, lat, lng, category) {
+        event.preventDefault();
+        const caseData = AppState.currentCase;
+        const form = event.target;
+        const poi = {
+            id: Database.generateId(),
+            category: category,
+            lat: lat,
+            lng: lng,
+            description: form.description.value,
+            importance: parseFloat(form.importance.value) || 0.5,
+            photo: '',
+            date: new Date().toISOString().split('T')[0]
+        };
+        caseData.poi = caseData.poi || [];
+        caseData.poi.push(poi);
+        Database.updateCase(caseData.id, { poi: caseData.poi });
+        AppState.currentCase = Database.getCase(caseData.id);
+        this.hideModal();
+        this.renderCurrentTab();
+        MapManager.setCase(AppState.currentCase);
+        this.recalculateZones();
+    },
+
+    renderPOIs(caseData, container) {
+        let html = '<div class="card"><h3>📍 Puntos de interés</h3>';
+        html += '<button class="btn" onclick="UI.showGenericPOIForm()">➕ Agregar punto (elegir en mapa)</button>';
+        html += '<table><tr><th>Categoría</th><th>Descripción</th><th>Coordenadas</th><th>Importancia</th><th>Acciones</th></tr>';
+        (caseData.poi || []).forEach(p => {
+            html += `<tr><td>${p.category}</td><td>${p.description || ''}</td><td>(${p.lat.toFixed(5)}, ${p.lng.toFixed(5)})</td><td>${p.importance || ''}</td>
+            <td><button class="btn btn-sm btn-danger" onclick="UI.deletePOI('${p.id}')">Eliminar</button></td></tr>`;
+        });
+        html += '</table></div>';
+        container.innerHTML = html;
+    },
+
+    showGenericPOIForm() {
+        alert('Haz clic en el mapa para seleccionar la ubicación y luego elige la categoría desde el menú contextual (pulsación larga).');
+        this.pendingAction = { type: 'poi' };
+    },
+
+    deletePOI(poiId) {
+        if (!confirm('¿Eliminar este punto?')) return;
+        const caseData = AppState.currentCase;
+        caseData.poi = caseData.poi.filter(p => p.id !== poiId);
+        Database.updateCase(caseData.id, { poi: caseData.poi });
+        AppState.currentCase = Database.getCase(caseData.id);
+        this.renderCurrentTab();
+        MapManager.setCase(AppState.currentCase);
+        this.recalculateZones();
+    },
+
+    // ========== RUTAS ==========
+    renderRoutes(caseData, container) {
+        let html = '<div class="card"><h3>🛤️ Rutas</h3>';
+        html += '<button class="btn" onclick="MapManager.startDrawingRoute()">➕ Dibujar ruta</button>';
+        html += '<table><tr><th>Nombre</th><th>Tipo</th><th>Frecuencia</th><th>Distancia (km)</th><th>Acciones</th></tr>';
+        (caseData.habitualRoutes || []).forEach(r => {
+            html += `<tr><td>${r.name}</td><td>${r.type || 'Habitual'}</td><td>${r.frequency || ''}</td><td>${r.distance ? r.distance.toFixed(2) : ''}</td>
+            <td><button class="btn btn-sm btn-danger" onclick="UI.deleteRoute('${r.id}')">Eliminar</button></td></tr>`;
+        });
+        html += '</table></div>';
+        container.innerHTML = html;
+    },
+
+    showRouteFormFromPoints(points) {
+        const distance = this.calculateRouteDistance(points);
+        const html = `
+            <h3>Nueva ruta</h3>
+            <p>Puntos: ${points.length}, Distancia: ${distance.toFixed(2)} km</p>
+            <form onsubmit="UI.saveRoute(event, ${JSON.stringify(points)}, ${distance})">
+                <div class="form-group"><label>Nombre</label><input type="text" name="name" required></div>
+                <div class="form-group"><label>Tipo</label>
+                    <select name="type"><option>Habitual</option><option>Observada</option><option>Posible</option><option>Retorno</option><option>Otra</option></select>
+                </div>
+                <div class="form-group"><label>Frecuencia</label><input type="text" name="frequency" placeholder="Diaria, Semanal"></div>
+                <div class="form-group"><label>Horario</label><input type="text" name="schedule"></div>
+                <div class="form-group"><label>Días</label><input type="text" name="days"></div>
+                <div class="form-group"><label>Nivel de confianza (0-1)</label><input type="range" min="0" max="1" step="0.1" name="confidence" value="0.8" oninput="this.nextElementSibling.textContent = this.value"><span>0.8</span></div>
+                <div class="form-group"><label>Observaciones</label><textarea name="observations"></textarea></div>
+                <button type="submit" class="btn">Guardar ruta</button>
+            </form>
+        `;
+        this.showModal(html);
+    },
+
+    calculateRouteDistance(points) {
+        let dist = 0;
+        for (let i = 0; i < points.length - 1; i++) {
+            dist += Calculations.distance(points[i].lat, points[i].lng, points[i+1].lat, points[i+1].lng);
+        }
+        return dist;
+    },
+
+    saveRoute(event, points, distance) {
+        event.preventDefault();
+        const caseData = AppState.currentCase;
+        const form = event.target;
         const route = {
             id: Database.generateId(),
             name: form.name.value,
+            type: form.type.value,
             frequency: form.frequency.value,
             schedule: form.schedule.value,
             days: form.days.value,
-            distance: parseFloat(form.distance.value) || 0,
-            duration: parseFloat(form.duration.value) || 0,
+            distance: distance,
+            duration: 0,
             confidence: parseFloat(form.confidence.value) || 0.8,
-            points
+            observations: form.observations.value,
+            points: points
         };
         caseData.habitualRoutes = caseData.habitualRoutes || [];
         caseData.habitualRoutes.push(route);
@@ -347,98 +709,30 @@ const UI = {
         this.recalculateZones();
     },
 
-    renderPOIs(caseData, container) {
-        let html = '<div class="card"><h3>📍 Puntos de interés</h3>';
-        html += '<button class="btn" onclick="UI.showAddPOIForm()">➕ Agregar punto</button>';
-        html += '<table><tr><th>Categoría</th><th>Descripción</th><th>Coordenadas</th><th>Importancia</th><th>Acciones</th></tr>';
-        (caseData.poi || []).forEach(p => {
-            html += `<tr><td>${p.category}</td><td>${p.description || ''}</td><td>(${p.lat.toFixed(5)}, ${p.lng.toFixed(5)})</td><td>${p.importance || ''}</td>
-            <td><button class="btn btn-sm btn-danger" onclick="UI.deletePOI('${p.id}')">Eliminar</button></td></tr>`;
-        });
-        html += '</table></div>';
-        container.innerHTML = html;
-    },
-
-    showAddPOIForm() {
-        const categories = ['food','water','park','market','restaurant','known_house','empty_land','abandoned','vegetation','quiet','traffic','dangerous_crossing','barrier','river','canal','wall','fence','other_animal','refuge'];
-        const html = `
-            <h3>Nuevo punto de interés</h3>
-            <form onsubmit="UI.addPOI(event)">
-                <div class="form-group"><label>Categoría</label>
-                    <select name="category">${categories.map(c => `<option value="${c}">${c}</option>`).join('')}</select>
-                </div>
-                <div class="form-group"><label>Latitud</label><input type="number" step="any" name="lat" required></div>
-                <div class="form-group"><label>Longitud</label><input type="number" step="any" name="lng" required></div>
-                <div class="form-group"><label>Descripción</label><textarea name="description"></textarea></div>
-                <div class="form-group"><label>Importancia (0-1)</label><input type="range" min="0" max="1" step="0.1" name="importance" value="0.5" oninput="this.nextElementSibling.textContent = this.value"><span>0.5</span></div>
-                <button type="submit" class="btn">Guardar</button>
-            </form>
-        `;
-        this.showModal(html);
-    },
-
-    addPOI(event) {
-        event.preventDefault();
-        const caseData = AppState.currentCase;
-        const form = event.target;
-        const poi = {
-            id: Database.generateId(),
-            category: form.category.value,
-            lat: parseFloat(form.lat.value),
-            lng: parseFloat(form.lng.value),
-            description: form.description.value,
-            importance: parseFloat(form.importance.value) || 0.5,
-            photo: '',
-            date: new Date().toISOString().split('T')[0]
-        };
-        caseData.poi = caseData.poi || [];
-        caseData.poi.push(poi);
-        Database.updateCase(caseData.id, { poi: caseData.poi });
-        AppState.currentCase = Database.getCase(caseData.id);
-        this.hideModal();
-        this.renderCurrentTab();
-        MapManager.setCase(AppState.currentCase);
-        this.recalculateZones();
-    },
-
-    deletePOI(poiId) {
-        if (!confirm('¿Eliminar este punto?')) return;
-        const caseData = AppState.currentCase;
-        caseData.poi = caseData.poi.filter(p => p.id !== poiId);
-        Database.updateCase(caseData.id, { poi: caseData.poi });
-        AppState.currentCase = Database.getCase(caseData.id);
-        this.renderCurrentTab();
-        MapManager.setCase(AppState.currentCase);
-        this.recalculateZones();
-    },
-
-    renderTimelineTab(caseData, container) {
-        let html = '<div class="card"><h3>🕒 Cronología</h3>';
-        html += '<div id="timeline-container"></div>';
-        html += '</div>';
-        container.innerHTML = html;
-        TimelineManager.renderTimeline(caseData, 'timeline-container');
-    },
-
+    // ========== EVIDENCIA ==========
     renderEvidence(caseData, container) {
         let html = '<div class="card"><h3>🔍 Evidencias</h3>';
-        html += '<button class="btn" onclick="UI.showAddEvidenceForm()">➕ Agregar evidencia</button>';
-        html += '<table><tr><th>Fecha</th><th>Ubicación</th><th>Descripción</th><th>Hecho</th><th>Interpretación</th><th>Acciones</th></tr>';
+        html += '<button class="btn" onclick="UI.showEvidenceForm(null, null)">➕ Agregar evidencia (elegir en mapa)</button>';
+        html += '<table><tr><th>Fecha</th><th>Ubicación</th><th>Hecho</th><th>Interpretación</th><th>Acciones</th></tr>';
         (caseData.evidence || []).forEach(e => {
-            html += `<tr><td>${new Date(e.datetime).toLocaleString()}</td><td>(${e.lat.toFixed(5)}, ${e.lng.toFixed(5)})</td><td>${e.description || ''}</td><td>${e.fact || ''}</td><td>${e.interpretation || ''}</td>
+            html += `<tr><td>${new Date(e.datetime).toLocaleString()}</td><td>(${e.lat.toFixed(5)}, ${e.lng.toFixed(5)})</td><td>${e.fact || ''}</td><td>${e.interpretation || ''}</td>
             <td><button class="btn btn-sm btn-danger" onclick="UI.deleteEvidence('${e.id}')">Eliminar</button></td></tr>`;
         });
         html += '</table></div>';
         container.innerHTML = html;
     },
 
-    showAddEvidenceForm() {
+    showEvidenceForm(lat, lng) {
+        if (lat === null || lat === undefined) {
+            alert('Haz clic en el mapa para seleccionar la ubicación de la evidencia.');
+            this.pendingAction = { type: 'evidence' };
+            return;
+        }
         const html = `
             <h3>Nueva evidencia</h3>
-            <form onsubmit="UI.addEvidence(event)">
+            <p><strong>📍 Ubicación:</strong> ${lat.toFixed(5)}, ${lng.toFixed(5)}</p>
+            <form onsubmit="UI.saveEvidence(event, ${lat}, ${lng})">
                 <div class="form-group"><label>Fecha y hora</label><input type="datetime-local" name="datetime" required></div>
-                <div class="form-group"><label>Latitud</label><input type="number" step="any" name="lat" required></div>
-                <div class="form-group"><label>Longitud</label><input type="number" step="any" name="lng" required></div>
                 <div class="form-group"><label>Descripción</label><textarea name="description"></textarea></div>
                 <div class="form-group"><label>Fuente</label><input type="text" name="source"></div>
                 <div class="form-group"><label>Confiabilidad (0-1)</label><input type="range" min="0" max="1" step="0.1" name="reliability" value="0.8" oninput="this.nextElementSibling.textContent = this.value"><span>0.8</span></div>
@@ -450,15 +744,15 @@ const UI = {
         this.showModal(html);
     },
 
-    addEvidence(event) {
+    saveEvidence(event, lat, lng) {
         event.preventDefault();
         const caseData = AppState.currentCase;
         const form = event.target;
         const evidence = {
             id: Database.generateId(),
             datetime: form.datetime.value,
-            lat: parseFloat(form.lat.value),
-            lng: parseFloat(form.lng.value),
+            lat: lat,
+            lng: lng,
             description: form.description.value,
             source: form.source.value,
             reliability: parseFloat(form.reliability.value) || 0.8,
@@ -469,7 +763,6 @@ const UI = {
         caseData.evidence = caseData.evidence || [];
         caseData.evidence.push(evidence);
         Database.updateCase(caseData.id, { evidence: caseData.evidence });
-        // Agregar a cronología
         TimelineManager.addEvent(caseData, {
             datetime: evidence.datetime,
             type: 'evidence',
@@ -492,51 +785,86 @@ const UI = {
         this.renderCurrentTab();
     },
 
-    renderSearchTab(caseData, container) {
-        SearchMode.renderSearchPanel(caseData, container.id);
+    // ========== TESTIMONIO ==========
+    showTestimonyForm(lat, lng) {
+        const html = `
+            <h3>🗣️ Testimonio</h3>
+            <p><strong>📍 Ubicación:</strong> ${lat.toFixed(5)}, ${lng.toFixed(5)}</p>
+            <form onsubmit="UI.saveTestimony(event, ${lat}, ${lng})">
+                <div class="form-group"><label>Fecha y hora</label><input type="datetime-local" name="datetime" required></div>
+                <div class="form-group"><label>Persona que reporta</label><input type="text" name="reporter"></div>
+                <div class="form-group"><label>Descripción del testimonio</label><textarea name="description" required></textarea></div>
+                <div class="form-group"><label>Nivel de confiabilidad (0-1)</label><input type="range" min="0" max="1" step="0.1" name="reliability" value="0.7" oninput="this.nextElementSibling.textContent = this.value"><span>0.7</span></div>
+                <button type="submit" class="btn">Guardar testimonio</button>
+            </form>
+        `;
+        this.showModal(html);
     },
 
+    saveTestimony(event, lat, lng) {
+        event.preventDefault();
+        const caseData = AppState.currentCase;
+        const form = event.target;
+        // Guardar como evidencia
+        const evidence = {
+            id: Database.generateId(),
+            datetime: form.datetime.value,
+            lat: lat,
+            lng: lng,
+            description: `Testimonio de ${form.reporter.value}`,
+            source: form.reporter.value,
+            reliability: parseFloat(form.reliability.value) || 0.7,
+            fact: form.description.value,
+            interpretation: 'Testimonio registrado',
+            photo: ''
+        };
+        caseData.evidence = caseData.evidence || [];
+        caseData.evidence.push(evidence);
+        Database.updateCase(caseData.id, { evidence: caseData.evidence });
+        TimelineManager.addEvent(caseData, {
+            datetime: evidence.datetime,
+            type: 'evidence',
+            description: `Testimonio: ${form.description.value.substring(0, 50)}`,
+            lat: lat,
+            lng: lng
+        });
+        AppState.currentCase = Database.getCase(caseData.id);
+        this.hideModal();
+        this.renderCurrentTab();
+        MapManager.setCase(AppState.currentCase);
+    },
+
+    // ========== CONFIGURACIÓN ==========
     renderConfig(container) {
         const config = Database.getConfig();
         let html = '<div class="card"><h3>⚙️ Configuración</h3>';
-        html += '<h4>Velocidades (km/h)</h4>';
-        html += `<form onsubmit="UI.saveConfig(event)">`;
-        html += `<div class="form-group"><label>Velocidad mínima</label><input type="number" step="0.1" name="vMin" value="${config.velocities.min}"></div>`;
-        html += `<div class="form-group"><label>Velocidad típica</label><input type="number" step="0.1" name="vTypical" value="${config.velocities.typical}"></div>`;
-        html += `<div class="form-group"><label>Velocidad máxima</label><input type="number" step="0.1" name="vMax" value="${config.velocities.max}"></div>`;
-        html += '<h4>Pesos del modelo</h4>';
-        Object.entries(config.weights).forEach(([key, val]) => {
-            html += `<div class="form-group"><label>${key}</label><input type="number" name="weight_${key}" value="${val}"></div>`;
-        });
-        html += '<h4>Parámetros de decaimiento (km)</h4>';
-        html += `<div class="form-group"><label>Sigma general</label><input type="number" step="0.1" name="sigma" value="${config.sigma}"></div>`;
-        html += `<div class="form-group"><label>Sigma hogar</label><input type="number" step="0.1" name="sigmaHome" value="${config.sigmaHome}"></div>`;
-        html += `<div class="form-group"><label>Sigma ruta</label><input type="number" step="0.1" name="sigmaRoute" value="${config.sigmaRoute}"></div>`;
-        html += `<div class="form-group"><label>Sigma POI</label><input type="number" step="0.1" name="sigmaPOI" value="${config.sigmaPOI}"></div>`;
-        html += '<button type="submit" class="btn">Guardar configuración</button>';
-        html += '</form></div>';
+        html += '<h4>🚶 Velocidades</h4>';
+        html += '<div class="form-group"><label>Velocidad mínima (caminando tranquilamente)</label>';
+        html += `<input type="number" step="0.1" id="vMin" value="${config.velocities.min}">`;
+        html += '<div class="help-text">Incluye pausas. Se usa para calcular el radio mínimo probable.</div></div>';
+        html += '<div class="form-group"><label>Velocidad habitual (desplazamiento normal)</label>';
+        html += `<input type="number" step="0.1" id="vTypical" value="${config.velocities.typical}">`;
+        html += '<div class="help-text">Se usa para la estimación central del desplazamiento.</div></div>';
+        html += '<div class="form-group"><label>Velocidad máxima (huida o carrera)</label>';
+        html += `<input type="number" step="0.1" id="vMax" value="${config.velocities.max}">`;
+        html += '<div class="help-text">Límite superior del radio de búsqueda probable.</div></div>';
+        html += '<button class="btn" onclick="UI.saveConfig()">Guardar configuración</button>';
+        html += '</div>';
         container.innerHTML = html;
     },
 
-    saveConfig(event) {
-        event.preventDefault();
-        const form = event.target;
+    saveConfig() {
         const config = Database.getConfig();
-        config.velocities.min = parseFloat(form.vMin.value);
-        config.velocities.typical = parseFloat(form.vTypical.value);
-        config.velocities.max = parseFloat(form.vMax.value);
-        Object.keys(config.weights).forEach(key => {
-            config.weights[key] = parseFloat(form[`weight_${key}`].value);
-        });
-        config.sigma = parseFloat(form.sigma.value);
-        config.sigmaHome = parseFloat(form.sigmaHome.value);
-        config.sigmaRoute = parseFloat(form.sigmaRoute.value);
-        config.sigmaPOI = parseFloat(form.sigmaPOI.value);
+        config.velocities.min = parseFloat(document.getElementById('vMin').value);
+        config.velocities.typical = parseFloat(document.getElementById('vTypical').value);
+        config.velocities.max = parseFloat(document.getElementById('vMax').value);
         Database.setConfig(config);
         ProbabilityEngine.config = config;
         alert('Configuración guardada');
+        this.renderCurrentTab();
     },
 
+    // ========== GESTIÓN DE CASO ==========
     renderCaseManagement(container) {
         const cases = Database.getCases();
         let html = '<div class="card"><h3>📁 Gestión de caso</h3>';
@@ -562,28 +890,16 @@ const UI = {
     },
 
     showCreateCaseForm() {
-        const html = `
-            <h3>Nuevo caso</h3>
-            <form onsubmit="UI.createCase(event)">
-                <div class="form-group"><label>Nombre del caso</label><input type="text" name="name" required placeholder="Max — Cajamarca — 30/08/2026"></div>
-                <div class="form-group"><label>Latitud lugar de extravío</label><input type="number" step="any" name="lostLat" required></div>
-                <div class="form-group"><label>Longitud lugar de extravío</label><input type="number" step="any" name="lostLng" required></div>
-                <div class="form-group"><label>Latitud hogar</label><input type="number" step="any" name="homeLat"></div>
-                <div class="form-group"><label>Longitud hogar</label><input type="number" step="any" name="homeLng"></div>
-                <div class="form-group"><label>Nombre del animal</label><input type="text" name="animalName" required></div>
-                <button type="submit" class="btn">Crear</button>
-            </form>
-        `;
-        this.showModal(html);
-    },
-
-    createCase(event) {
-        event.preventDefault();
-        const form = event.target;
+        alert('Para crear un caso, primero selecciona en el mapa la ubicación del lugar de extravío (pulsación larga). Luego podrás completar los datos.');
+        // Simplificación: pedir nombre y luego usar el mapa
+        const name = prompt('Nombre del caso (ej: Max — Cajamarca — 30/08/2026):');
+        if (!name) return;
+        const animalName = prompt('Nombre del animal:');
+        if (!animalName) return;
         const caseData = {
-            name: form.name.value,
+            name: name,
             animal: {
-                name: form.animalName.value,
+                name: animalName,
                 photo: '',
                 species: 'Perro',
                 breed: '',
@@ -600,21 +916,19 @@ const UI = {
                     neighborhoodKnowledge: 0.5, activityLevel: 0.5
                 }
             },
-            locations: {
-                lost: { lat: parseFloat(form.lostLat.value), lng: parseFloat(form.lostLng.value), description: 'Lugar de extravío' },
-                home: form.homeLat.value ? { lat: parseFloat(form.homeLat.value), lng: parseFloat(form.homeLng.value), description: 'Hogar' } : null,
-                base: form.homeLat.value ? { lat: parseFloat(form.homeLat.value), lng: parseFloat(form.homeLng.value), description: 'Hogar' } : null
-            },
+            locations: {},
             habitualRoutes: [],
             sightings: [],
             poi: [],
+            safeZones: [],
+            extravioTimeline: { lastConfirmed: null, detection: null, searchStart: null },
             timeline: [],
             evidence: [],
-            searchZones: []
+            searchZones: [],
+            searchCoverage: []
         };
         const newCase = Database.createCase(caseData);
         AppState.currentCase = newCase;
-        this.hideModal();
         document.getElementById('case-indicator').textContent = newCase.name;
         MapManager.setCase(newCase);
         this.switchTab('dashboard');
@@ -696,15 +1010,29 @@ const UI = {
     },
 
     handleMapClickForForm(latlng) {
-        // Si hay un formulario modal abierto con campos lat/lng, rellenarlos
-        const modal = document.getElementById('modal-overlay');
-        if (modal.classList.contains('hidden')) return;
-        const latInput = modal.querySelector('input[name="lat"]');
-        const lngInput = modal.querySelector('input[name="lng"]');
-        if (latInput && lngInput) {
-            latInput.value = latlng.lat.toFixed(6);
-            lngInput.value = latlng.lng.toFixed(6);
-            alert('Coordenadas capturadas del mapa');
+        // Si hay una acción pendiente, ejecutarla con las coordenadas
+        if (this.pendingAction) {
+            const action = this.pendingAction;
+            this.pendingAction = null;
+            switch (action.type) {
+                case 'sighting': this.showSightingForm(latlng.lat, latlng.lng); break;
+                case 'evidence': this.showEvidenceForm(latlng.lat, latlng.lng); break;
+                case 'lastConfirmed': this.showLastConfirmedForm(latlng.lat, latlng.lng); break;
+                case 'poi': this.showGenericPOIForm(); break;
+                default: break;
+            }
+        } else {
+            // Si hay un modal abierto con campos lat/lng, rellenarlos (por compatibilidad)
+            const modal = document.getElementById('modal-overlay');
+            if (!modal.classList.contains('hidden')) {
+                const latInput = modal.querySelector('input[name="lat"]');
+                const lngInput = modal.querySelector('input[name="lng"]');
+                if (latInput && lngInput) {
+                    latInput.value = latlng.lat.toFixed(6);
+                    lngInput.value = latlng.lng.toFixed(6);
+                    alert('Coordenadas capturadas');
+                }
+            }
         }
     }
 };

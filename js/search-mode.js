@@ -1,9 +1,7 @@
-// search-mode.js — Modo búsqueda, geolocalización, zonas revisadas
+// search-mode.js — Modo búsqueda, registro de cobertura, geolocalización
 
 const SearchMode = {
-    // Inicializar modo búsqueda
     init() {
-        // Escuchar evento de ubicación actual
         document.addEventListener('rastro:currentLocation', (e) => {
             this.handleCurrentLocation(e.detail);
         });
@@ -14,32 +12,51 @@ const SearchMode = {
         // Aquí podríamos sugerir rutas o mostrar distancia a zonas prioritarias
     },
 
-    // Marcar zona como revisada
-    markZoneReviewed(caseData, lat, lng, outcome, notes = '') {
-        if (!caseData.searchZones) caseData.searchZones = [];
-        const zone = {
+    // Marcar zona como revisada en lat/lng específico
+    markZoneReviewedAt(lat, lng) {
+        const caseData = AppState.currentCase;
+        if (!caseData) {
+            alert('No hay caso activo');
+            return;
+        }
+        const radius = prompt('Radio de la zona revisada (metros):', '100');
+        if (!radius) return;
+        const radiusMeters = parseFloat(radius);
+        if (isNaN(radiusMeters) || radiusMeters <= 0) return;
+
+        const notes = prompt('Notas (opcional):', '');
+        this.addSearchCoverage(caseData, 'circle', { lat, lng }, radiusMeters, null, notes || '');
+        alert('Zona revisada registrada.');
+        MapManager.drawSearchCoverage(caseData);
+        UI.renderCurrentTab();
+    },
+
+    // Agregar cobertura de búsqueda (círculo o polígono)
+    addSearchCoverage(caseData, type, centerOrPoints, radiusMeters, points, notes) {
+        if (!caseData.searchCoverage) caseData.searchCoverage = [];
+        const coverage = {
             id: Database.generateId(),
-            lat,
-            lng,
-            reviewed: true,
-            outcome: outcome || 'reviewed',
-            notes,
+            type: type, // 'circle' o 'polygon'
+            center: centerOrPoints, // {lat, lng} para círculo
+            radiusMeters: radiusMeters,
+            points: points, // array de {lat, lng} para polígono
+            notes: notes || '',
             timestamp: new Date().toISOString()
         };
-        caseData.searchZones.push(zone);
-        Database.updateCase(caseData.id, { searchZones: caseData.searchZones });
+        caseData.searchCoverage.push(coverage);
+        Database.updateCase(caseData.id, { searchCoverage: caseData.searchCoverage });
         // Agregar a la cronología
         TimelineManager.addEvent(caseData, {
             datetime: new Date().toISOString(),
             type: 'search',
-            description: `Zona revisada: ${outcome}`,
-            lat,
-            lng
+            description: `Zona revisada: ${notes || 'sin notas'}`,
+            lat: centerOrPoints ? centerOrPoints.lat : (points && points[0] ? points[0].lat : null),
+            lng: centerOrPoints ? centerOrPoints.lng : (points && points[0] ? points[0].lng : null)
         });
-        return zone;
+        return coverage;
     },
 
-    // Obtener zonas pendientes (no revisadas)
+    // Obtener zonas pendientes (sin revisar) - para compatibilidad
     getPendingZones(caseData) {
         return (caseData.searchZones || []).filter(z => !z.reviewed);
     },
@@ -49,25 +66,23 @@ const SearchMode = {
         const container = document.getElementById(containerId);
         if (!container) return;
 
-        const pending = this.getPendingZones(caseData);
-        const lastSighting = ProbabilityEngine.getLastSighting(caseData);
+        const lastSighting = ProbabilityEngine.getLastConfidentSighting(caseData);
         const confidence = ProbabilityEngine.calculateConfidence(caseData);
         const conflicts = ProbabilityEngine.detectConflicts(caseData);
 
         let html = '<div class="card"><h3>🔎 Modo Búsqueda</h3>';
-
-        // Botón para obtener ubicación
         html += `<button class="btn" onclick="MapManager.locateUser()">📍 Mi ubicación actual</button>`;
+        html += `<button class="btn btn-success" onclick="SearchMode.startQuickCoverage()">🔎 Registrar zona revisada (en mi ubicación)</button>`;
 
-        // Última evidencia
         if (lastSighting) {
-            html += `<p><strong>Última evidencia:</strong> ${lastSighting.description || 'Avistamiento'} a las ${new Date(lastSighting.datetime).toLocaleTimeString()}</p>`;
+            html += `<p><strong>Última evidencia confiable:</strong> ${new Date(lastSighting.datetime).toLocaleString()}</p>`;
         }
 
-        // Nivel de confianza
         html += `<p>Nivel de confianza: <span class="score-badge confidence-${confidence.level}">${confidence.level.toUpperCase()} (${confidence.percentage}%)</span></p>`;
+        if (confidence.reasons && confidence.reasons.length > 0) {
+            html += '<p><strong>Razones:</strong> ' + confidence.reasons.join(', ') + '</p>';
+        }
 
-        // Conflictos
         if (conflicts.length > 0) {
             html += '<div class="card" style="border-left: 4px solid #e74c3c; padding: 10px;">';
             html += '<strong>⚠️ POSIBLE CONFLICTO DE EVIDENCIA</strong><br>';
@@ -75,20 +90,7 @@ const SearchMode = {
             html += '</div>';
         }
 
-        // Zonas pendientes
-        html += '<h4>Zonas pendientes de revisión</h4>';
-        if (pending.length === 0) {
-            html += '<p>No hay zonas pendientes registradas.</p>';
-        } else {
-            html += '<ul>';
-            pending.forEach(z => {
-                html += `<li>Zona en (${z.lat.toFixed(5)}, ${z.lng.toFixed(5)}) — <button class="btn btn-sm btn-success" onclick="SearchMode.markZoneReviewed(AppState.currentCase, ${z.lat}, ${z.lng}, 'reviewed', '')">Marcar revisada</button></li>`;
-            });
-            html += '</ul>';
-        }
-
-        // Botones para marcar resultado rápido
-        html += '<h4>Registrar resultado en mi posición</h4>';
+        html += '<h4>Registrar resultado rápido</h4>';
         html += `<button class="btn btn-sm" onclick="SearchMode.registerOutcome('no_evidence')">Sin evidencia</button>
                  <button class="btn btn-sm" onclick="SearchMode.registerOutcome('clue_found')">Indicio encontrado</button>
                  <button class="btn btn-sm" onclick="SearchMode.registerOutcome('sighting')">Avistamiento</button>
@@ -98,7 +100,34 @@ const SearchMode = {
         container.innerHTML = html;
     },
 
-    // Registrar resultado en la ubicación actual (obtenida del mapa)
+    // Iniciar registro rápido de cobertura desde la ubicación actual
+    startQuickCoverage() {
+        if (!navigator.geolocation) {
+            alert('Geolocalización no soportada');
+            return;
+        }
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                const radius = prompt('Radio de la zona revisada (metros):', '100');
+                if (!radius) return;
+                const radiusMeters = parseFloat(radius);
+                if (isNaN(radiusMeters) || radiusMeters <= 0) return;
+                const caseData = AppState.currentCase;
+                if (!caseData) return;
+                this.addSearchCoverage(caseData, 'circle', 
+                    { lat: pos.coords.latitude, lng: pos.coords.longitude }, 
+                    radiusMeters, null, 'Revisada desde mi ubicación');
+                MapManager.drawSearchCoverage(caseData);
+                UI.renderCurrentTab();
+            },
+            (err) => {
+                alert('No se pudo obtener tu ubicación: ' + err.message);
+            },
+            { enableHighAccuracy: true, timeout: 10000 }
+        );
+    },
+
+    // Registrar resultado en la ubicación actual del mapa (mantener compatibilidad)
     registerOutcome(outcome) {
         const mapCenter = MapManager.getCenter();
         const lat = mapCenter.lat;
@@ -109,9 +138,9 @@ const SearchMode = {
             return;
         }
         const notes = prompt('Notas adicionales (opcional):', '');
-        this.markZoneReviewed(caseData, lat, lng, outcome, notes || '');
+        this.addSearchCoverage(caseData, 'circle', { lat, lng }, 50, null, notes || outcome);
+        MapManager.drawSearchCoverage(caseData);
         UI.renderCurrentTab();
-        MapManager.drawSearchZones(caseData);
         alert('Resultado registrado.');
     }
 };

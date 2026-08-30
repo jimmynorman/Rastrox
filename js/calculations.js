@@ -1,20 +1,11 @@
-// calculations.js — Funciones geométricas y utilidades matemáticas
+// calculations.js — Funciones geométricas y utilidades matemáticas (ampliado para áreas)
 
 const Calculations = {
-    // Radio de la Tierra en km
     EARTH_RADIUS_KM: 6371,
 
-    // Convertir grados a radianes
-    toRad(deg) {
-        return deg * Math.PI / 180;
-    },
+    toRad(deg) { return deg * Math.PI / 180; },
+    toDeg(rad) { return rad * 180 / Math.PI; },
 
-    // Convertir radianes a grados
-    toDeg(rad) {
-        return rad * 180 / Math.PI;
-    },
-
-    // Distancia entre dos puntos geográficos (fórmula haversine) en km
     distance(lat1, lng1, lat2, lng2) {
         const dLat = this.toRad(lat2 - lat1);
         const dLng = this.toRad(lng2 - lng1);
@@ -25,12 +16,10 @@ const Calculations = {
         return this.EARTH_RADIUS_KM * c;
     },
 
-    // Distancia en metros
     distanceMeters(lat1, lng1, lat2, lng2) {
         return this.distance(lat1, lng1, lat2, lng2) * 1000;
     },
 
-    // Bearing (rumbo) desde punto 1 a punto 2 en grados (0-360)
     bearing(lat1, lng1, lat2, lng2) {
         const dLng = this.toRad(lng2 - lng1);
         const y = Math.sin(dLng) * Math.cos(this.toRad(lat2));
@@ -40,13 +29,11 @@ const Calculations = {
         return (brng + 360) % 360;
     },
 
-    // Calcular punto destino dado origen, distancia (km) y bearing
     destinationPoint(lat, lng, distanceKm, bearingDeg) {
         const brng = this.toRad(bearingDeg);
         const dR = distanceKm / this.EARTH_RADIUS_KM;
         const lat1 = this.toRad(lat);
         const lng1 = this.toRad(lng);
-
         const lat2 = Math.asin(Math.sin(lat1) * Math.cos(dR) +
                                Math.cos(lat1) * Math.sin(dR) * Math.cos(brng));
         const lng2 = lng1 + Math.atan2(Math.sin(brng) * Math.sin(dR) * Math.cos(lat1),
@@ -54,7 +41,6 @@ const Calculations = {
         return { lat: this.toDeg(lat2), lng: this.toDeg(lng2) };
     },
 
-    // Calcular bounding box de un conjunto de puntos
     boundingBox(points) {
         if (!points || points.length === 0) return null;
         let minLat = Infinity, maxLat = -Infinity;
@@ -68,7 +54,6 @@ const Calculations = {
         return { minLat, maxLat, minLng, maxLng };
     },
 
-    // Expandir bounding box por un factor (0.2 = 20%)
     expandBoundingBox(bbox, factor) {
         const latSpan = bbox.maxLat - bbox.minLat;
         const lngSpan = bbox.maxLng - bbox.minLng;
@@ -80,7 +65,6 @@ const Calculations = {
         };
     },
 
-    // Generar una cuadrícula de puntos dentro de un bounding box
     generateGrid(bbox, cols = 40, rows = 40) {
         const points = [];
         const latStep = (bbox.maxLat - bbox.minLat) / (rows - 1);
@@ -96,7 +80,6 @@ const Calculations = {
         return points;
     },
 
-    // Distancia mínima desde un punto a una polilínea (en km)
     distanceToPolyline(lat, lng, polylinePoints) {
         if (!polylinePoints || polylinePoints.length < 2) return Infinity;
         let minDist = Infinity;
@@ -109,40 +92,33 @@ const Calculations = {
         return minDist;
     },
 
-    // Distancia de un punto a un segmento (en km)
     distanceToSegment(lat, lng, lat1, lng1, lat2, lng2) {
-        // Convertir a coordenadas planas aproximadas (proyección equirectangular)
         const x = lng * Math.cos(this.toRad(lat));
         const y = lat;
         const x1 = lng1 * Math.cos(this.toRad(lat1));
         const y1 = lat1;
         const x2 = lng2 * Math.cos(this.toRad(lat2));
         const y2 = lat2;
-
         const dx = x2 - x1;
         const dy = y2 - y1;
         const lengthSq = dx*dx + dy*dy;
         if (lengthSq === 0) {
-            // Segmento degenerado a punto
             return this.distance(lat, lng, lat1, lng1);
         }
         let t = ((x - x1) * dx + (y - y1) * dy) / lengthSq;
         t = Math.max(0, Math.min(1, t));
         const projX = x1 + t * dx;
         const projY = y1 + t * dy;
-        // Convertir proyección de vuelta a lat/lng aproximados
         const projLat = projY;
         const projLng = projX / Math.cos(this.toRad(projLat));
         return this.distance(lat, lng, projLat, projLng);
     },
 
-    // Calcular punto medio entre dos coordenadas
     midpoint(lat1, lng1, lat2, lng2) {
         const dLng = this.toRad(lng2 - lng1);
         const lat1r = this.toRad(lat1);
         const lat2r = this.toRad(lat2);
         const lng1r = this.toRad(lng1);
-
         const Bx = Math.cos(lat2r) * Math.cos(dLng);
         const By = Math.cos(lat2r) * Math.sin(dLng);
         const lat3 = Math.atan2(Math.sin(lat1r) + Math.sin(lat2r),
@@ -151,7 +127,6 @@ const Calculations = {
         return { lat: this.toDeg(lat3), lng: this.toDeg(lng3) };
     },
 
-    // Calcular interpolación lineal entre dos puntos en fracción t (0-1)
     interpolate(lat1, lng1, lat2, lng2, t) {
         return {
             lat: lat1 + (lat2 - lat1) * t,
@@ -159,12 +134,10 @@ const Calculations = {
         };
     },
 
-    // Verificar si un punto está dentro de un radio (en km) de otro
     isWithinRadius(lat1, lng1, lat2, lng2, radiusKm) {
         return this.distance(lat1, lng1, lat2, lng2) <= radiusKm;
     },
 
-    // Obtener puntos de una polilínea cada cierta distancia para muestreo
     samplePolyline(points, sampleDistanceKm = 0.1) {
         if (points.length < 2) return points;
         const sampled = [points[0]];
@@ -179,8 +152,43 @@ const Calculations = {
             }
         }
         return sampled;
+    },
+
+    // Verificar si un punto está dentro de un polígono (ray casting)
+    pointInPolygon(lat, lng, polygonPoints) {
+        let inside = false;
+        for (let i = 0, j = polygonPoints.length - 1; i < polygonPoints.length; j = i++) {
+            const xi = polygonPoints[i].lat, yi = polygonPoints[i].lng;
+            const xj = polygonPoints[j].lat, yj = polygonPoints[j].lng;
+            const intersect = ((yi > lng) !== (yj > lng)) &&
+                (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi);
+            if (intersect) inside = !inside;
+        }
+        return inside;
+    },
+
+    // Calcular área de un polígono en km² (aproximada)
+    polygonArea(polygonPoints) {
+        if (polygonPoints.length < 3) return 0;
+        let area = 0;
+        for (let i = 0; i < polygonPoints.length; i++) {
+            const j = (i + 1) % polygonPoints.length;
+            const p1 = polygonPoints[i];
+            const p2 = polygonPoints[j];
+            area += (p1.lng * Math.cos(this.toRad(p1.lat))) * p2.lat;
+            area -= (p2.lng * Math.cos(this.toRad(p2.lat))) * p1.lat;
+        }
+        area = Math.abs(area) / 2;
+        // Convertir a km² aproximados (1 grado ≈ 111 km)
+        return area * 111 * 111;
+    },
+
+    // Calcular centroide de un polígono
+    polygonCentroid(polygonPoints) {
+        let latSum = 0, lngSum = 0;
+        polygonPoints.forEach(p => { latSum += p.lat; lngSum += p.lng; });
+        return { lat: latSum / polygonPoints.length, lng: lngSum / polygonPoints.length };
     }
 };
 
-// Exportar para uso global
 window.Calculations = Calculations;

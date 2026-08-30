@@ -1,11 +1,11 @@
-// app.js — Inicialización principal y coordinación
+// app.js — Inicialización principal y coordinación (v0.2)
 
 const AppState = {
     currentCase: null
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('RASTRO v0.1 iniciando...');
+    console.log('RASTROX v0.2 iniciando...');
 
     // Inicializar módulos
     MapManager.init();
@@ -19,15 +19,17 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.classList.add('dark');
     }
 
-    // Cargar caso de demostración o último caso activo
+    // Migrar todos los casos existentes
     const cases = Database.getCases();
+    cases.forEach(c => Database.migrateCaseData(c));
+    Database.saveCases(cases);
+
+    // Cargar caso activo (si hay)
     if (cases.length > 0) {
-        // Cargar el primer caso como activo por defecto
         AppState.currentCase = cases[0];
         document.getElementById('case-indicator').textContent = cases[0].name;
         MapManager.setCase(cases[0]);
         UI.switchTab('dashboard');
-        // Recalcular zonas automáticamente
         UI.recalculateZones();
     } else {
         // Intentar cargar ejemplo
@@ -51,5 +53,5 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    console.log('RASTRO v0.1 listo');
+    console.log('RASTROX v0.2 listo');
 });
