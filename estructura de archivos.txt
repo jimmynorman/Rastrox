@@ -1,0 +1,16 @@
+/rastro/
+├── index.html
+├── css/
+│   └── styles.css
+├── js/
+│   ├── app.js
+│   ├── map.js
+│   ├── database.js
+│   ├── calculations.js
+│   ├── probability.js
+│   ├── timeline.js
+│   ├── search-mode.js
+│   └── ui.js
+├── data/
+│   └── example-case.json
+└── README.md
